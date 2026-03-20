@@ -1,3 +1,4 @@
+```
 rdma-ai-infra/
 │
 ├── common/                          # 纯 C — 两边都能链
@@ -95,3 +96,4 @@ rdma-ai-infra/
 │
 ├── CMakeLists.txt
 └── README.md
+```
