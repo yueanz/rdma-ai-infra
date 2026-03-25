@@ -97,7 +97,7 @@ int main(int argc, char *argv[]) {
         goto out;
     }
 
-    qp.local.addr = mr.mr->addr;
+    qp.local.addr = (uint64_t)(uintptr_t)mr.mr->addr;
     qp.local.rkey = mr.mr->rkey;
 
     if (cfg.server_ip == NULL && rdma_exchange_info_server(&qp, cfg.port) != 0) {
