@@ -1,0 +1,123 @@
+#include "rdma_common.h"
+#include "logging.h"
+
+int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size) {
+    struct ibv_sge sge = {0};
+    struct ibv_send_wr wr = {0};
+    struct ibv_send_wr *bad_wr = NULL;
+
+    if (qp == NULL || mr == NULL) {
+        LOG_ERR("queue pair or memory region is null");
+        return -1;
+    }
+    if (size == 0 || size > mr->size) {
+        LOG_ERR("post size is 0 or post size exceeds the size of mr buf");
+        return -1;
+    }
+
+    sge.addr = (uintptr_t)mr->buf;
+    sge.length = size;
+    sge.lkey = mr->mr->lkey;
+
+    wr.wr_id = 1;
+    wr.sg_list = &sge;
+    wr.num_sge = 1;
+    wr.opcode = IBV_WR_SEND;
+    wr.send_flags = IBV_SEND_SIGNALED;
+
+    if (ibv_post_send(qp->qp, &wr, &bad_wr) != 0) {
+        LOG_ERR("failed to post send");
+        return -1;
+    }
+    return 0;
+}
+
+int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size) {
+    struct ibv_sge sge = {0};
+    struct ibv_recv_wr wr = {0};
+    struct ibv_recv_wr *bad_wr = NULL;
+
+    if (qp == NULL || mr == NULL) {
+        LOG_ERR("queue pair or memory region is null");
+        return -1;
+    }
+    if (size == 0 || size > mr->size) {
+        LOG_ERR("recv size is 0 or recv size exceeds the size of mr buf");
+        return -1;
+    }
+
+    sge.addr = (uintptr_t)mr->buf;
+    sge.length = size;
+    sge.lkey = mr->mr->lkey;
+
+    wr.wr_id = 1;
+    wr.sg_list = &sge;
+    wr.num_sge = 1;
+
+    if (ibv_post_recv(qp->qp, &wr, &bad_wr) != 0) {
+        LOG_ERR("ibv post recv failed");
+        return -1;
+    }
+
+    return 0;
+}
+
+int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size) {
+    struct ibv_sge sge = {0};
+    struct ibv_send_wr wr = {0};
+    struct ibv_send_wr *bad_wr = NULL;
+
+    if (qp == NULL || mr == NULL) {
+        LOG_ERR("queue pair or memory region is null");
+        return -1;
+    }
+    if (size == 0 || size > mr->size) {
+        LOG_ERR("write size is 0 or write size exceeds the size of mr buf");
+        return -1;
+    }
+
+    sge.addr = (uintptr_t)mr->buf;
+    sge.length = size;
+    sge.lkey = mr->mr->lkey;
+
+    wr.wr_id = 1;
+    wr.sg_list = &sge;
+    wr.num_sge = 1;
+    wr.opcode = IBV_WR_RDMA_WRITE;
+    wr.send_flags = IBV_SEND_SIGNALED;
+    wr.wr.rdma.remote_addr = qp->remote.addr;
+    wr.wr.rdma.rkey = qp->remote.rkey;
+
+    if (ibv_post_send(qp->qp, &wr, &bad_wr) != 0) {
+        LOG_ERR("ibv post send failed");
+        return -1;
+    } 
+
+    return 0;
+}
+
+int rdma_poll_cq(rdma_ctx_t *ctx) {
+    int n;
+    struct ibv_wc wc = {0};
+
+    if (ctx == NULL) {
+        LOG_ERR("rdma context is null");
+        return -1;
+    }
+    while (1) {
+        n = ibv_poll_cq(ctx->cq, 1, &wc);
+        if (n < 0) {
+            LOG_ERR("ibv poll completion queue failed");
+            return -1;
+        }
+        if (n > 0) {
+            if (wc.status != IBV_WC_SUCCESS) {
+                LOG_ERR("work completion error: %s", ibv_wc_status_str(wc.status));
+                return -1;
+            }
+            return 0;
+        }
+        __builtin_ia32_pause();
+    }
+    return 0;
+}
