@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include "rdma_common.h"
 #include "timing.h"
 #include "logging.h"
