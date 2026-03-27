@@ -8,6 +8,7 @@ typedef struct config {
     int port;
     int iters;
     int size;
+    int depth;
 } config_t;
 
 static void config_init(config_t *cfg) {
@@ -15,6 +16,7 @@ static void config_init(config_t *cfg) {
     cfg->port = 12345;
     cfg->iters = 1000;
     cfg->size = 64;
+    cfg->depth = 16;
 }
 
 static int config_parse(int argc, char *argv[], config_t *cfg) {
@@ -38,6 +40,12 @@ static int config_parse(int argc, char *argv[], config_t *cfg) {
                 return -1;
             }
             cfg->size = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--depth") == 0) {
+            if (i + 1 >= argc) {
+                printf("missing value after --depth\n");
+                return -1;
+            }
+            cfg->depth = atoi(argv[++i]);
         } else if (argv[i][0] != '-') {
             cfg->server_ip = argv[i];
         } else {
@@ -50,25 +58,29 @@ static int config_parse(int argc, char *argv[], config_t *cfg) {
 
 static void config_usage(const char *prog) {
     printf("Usage:\n");
-    printf("  %s [--port <port>] [--iters <n>] [--size <bytes>]\n", prog);
-    printf("  %s <server_ip> [--port <port>] [--iters <n>] [--size <bytes>]\n", prog);
+    printf("  %s [--port <port>] [--iters <n>] [--size <bytes>] [--depth <n>]\n", prog);
+    printf("  %s <server_ip> [--port <port>] [--iters <n>] [--size <bytes>] [--depth <n>]\n", prog);
 }
 
-static int cmp_u64(const void *a, const void *b) {
-    uint64_t x = *(const uint64_t*)a;
-    uint64_t y = *(const uint64_t*)b;
-    return (x>y) - (x<y);
+static void print_bandwidth(uint64_t total_bytes, uint64_t elapsed_ns) {
+    double elapsed_s  = elapsed_ns / 1e9;
+    double gbps       = (double)total_bytes * 8 / elapsed_s / 1e9;
+    double GBps       = (double)total_bytes / elapsed_s / (1024.0 * 1024 * 1024);
+
+    printf("bandwidth (BW)\n");
+    printf("%-10s %-10s %-10s\n", "transferred", "elapsed", "throughput");
+    printf("%-10lu bytes %-10.2f ms %-10.2f GB/s (%-10.2f Gbps)\n", total_bytes, elapsed_ns / 1e6, GBps, gbps);
 }
 
 int main(int argc, char *argv[]) {
     int ret = 1, i;
-    uint64_t start;
+    uint64_t start_time, total_time;
     config_t cfg = {0};
     rdma_ctx_t ctx = {0};
     rdma_mr_t mr = {0};
     rdma_qp_t qp = {0};
-    uint64_t *latencies = NULL;
     volatile uint8_t *doorbell;
+    uint32_t send_flags;
 
     config_init(&cfg);
     if (config_parse(argc, argv, &cfg) != 0) {
@@ -125,39 +137,26 @@ int main(int argc, char *argv[]) {
         }
     } else {
         // client side
-        latencies = malloc(cfg.iters * sizeof(uint64_t));
-        if (latencies == NULL) {
-            LOG_ERR("latencies malloc failed");
-            goto out;
-        }
-
         doorbell = (uint8_t *)mr.buf + cfg.size - 1;
+        start_time = time_now_ns();
         for (i = 0; i < cfg.iters; i++) {
             *doorbell = 1;
-            start = time_now_ns();
-            if (rdma_post_write(&qp, &mr, cfg.size, IBV_SEND_SIGNALED) != 0) {
+            send_flags = ((i+1) % cfg.depth == 0 || i == cfg.iters-1) ? IBV_SEND_SIGNALED : 0;
+            if (rdma_post_write(&qp, &mr, cfg.size, send_flags) != 0) {
                 LOG_ERR("rdma post write failed");
                 goto out;
             }
-            if (rdma_poll_cq(&ctx) != 0) {
+            if ((send_flags & IBV_SEND_SIGNALED) && rdma_poll_cq(&ctx) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
-            latencies[i] = time_elapsed_ns(start, time_now_ns());
         }
-        qsort(latencies, cfg.iters, sizeof(uint64_t), cmp_u64);
-        printf("latency (RTT)\n");
-        printf("%-10s %-10s %-10s %-10s\n", "min(us)", "median(us)", "p99(us)", "max(us)");
-        printf("%-10.2f %-10.2f %-10.2f %-10.2f\n",
-            ns_to_us(latencies[0]),
-            ns_to_us(latencies[cfg.iters / 2]),
-            ns_to_us(latencies[(int)(cfg.iters * 0.99)]),
-            ns_to_us(latencies[cfg.iters - 1]));
+        total_time = time_elapsed_ns(start_time, time_now_ns());
+        print_bandwidth((uint64_t)cfg.size*cfg.iters, total_time);
     }
 
     ret = 0;
 out:
-    free(latencies);
     rdma_qp_destroy(&qp);
     rdma_mr_dereg(&mr);
     rdma_ctx_destroy(&ctx);
