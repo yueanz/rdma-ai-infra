@@ -63,13 +63,16 @@ static void config_usage(const char *prog) {
 }
 
 static void print_bandwidth(uint64_t total_bytes, uint64_t elapsed_ns) {
-    double elapsed_s  = elapsed_ns / 1e9;
-    double gbps       = (double)total_bytes * 8 / elapsed_s / 1e9;
-    double GBps       = (double)total_bytes / elapsed_s / (1024.0 * 1024 * 1024);
+    double elapsed_ms = elapsed_ns / 1e6;
+    double gbps       = (double)total_bytes * 8 / (elapsed_ns / 1e9) / 1e9;
+    double GBps       = (double)total_bytes / (elapsed_ns / 1e9) / (1024.0 * 1024 * 1024);
 
-    printf("bandwidth (BW)\n");
-    printf("%-10s %-10s %-10s\n", "transferred", "elapsed", "throughput");
-    printf("%-10lu bytes %-10.2f ms %-10.2f GB/s (%-10.2f Gbps)\n", total_bytes, elapsed_ns / 1e6, GBps, gbps);
+    printf("\n--- Bandwidth Results ---\n");
+    printf("  transferred : %lu bytes (%.2f MB)\n",
+           total_bytes, total_bytes / (1024.0 * 1024));
+    printf("  elapsed     : %.2f ms\n", elapsed_ms);
+    printf("  throughput  : %.2f GB/s  /  %.2f Gbps\n", GBps, gbps);
+    printf("-------------------------\n");
 }
 
 int main(int argc, char *argv[]) {
