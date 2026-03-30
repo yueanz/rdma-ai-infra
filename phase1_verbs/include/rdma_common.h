@@ -55,6 +55,7 @@ typedef struct rdma_mr
                             are the access keys the NIC uses */
     void          *buf;  /* Pointer to the backing memory buffer */
     size_t         size; /* Size of the buffer in bytes */
+    int            owns_buf;
 } rdma_mr_t;
 
 
@@ -75,6 +76,7 @@ typedef struct rdma_qp
 int rdma_ctx_init(rdma_ctx_t *ctx, int port, int gid_index);
 void rdma_ctx_destroy(rdma_ctx_t *ctx);
 int rdma_mr_reg(rdma_ctx_t *ctx, rdma_mr_t *mr, size_t size);
+int rdma_mr_reg_external(rdma_ctx_t *ctx, rdma_mr_t *mr, void *buf, size_t size);
 void rdma_mr_dereg(rdma_mr_t *mr);
 int rdma_qp_create(rdma_ctx_t *ctx, rdma_qp_t *qp);
 int rdma_qp_init(rdma_ctx_t *ctx, rdma_qp_t *qp);

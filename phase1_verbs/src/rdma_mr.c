@@ -26,6 +26,27 @@ int rdma_mr_reg(rdma_ctx_t *ctx, rdma_mr_t *mr, size_t size) {
     }
     mr->buf = buf;
     mr->size = size;
+    mr->owns_buf = 1;
+    return 0;
+}
+
+int rdma_mr_reg_external(rdma_ctx_t *ctx, rdma_mr_t *mr, void *buf, size_t size) {
+    if (size == 0) {
+        LOG_ERR("rdma_mr_reg_external failed: size is 0");
+        return -1;
+    }
+    if (ctx == NULL || mr == NULL || buf == NULL) {
+        LOG_ERR("rdma_mr_reg_external failed: ctx is null or mr is null or buf is null");
+        return -1;
+    }
+    mr->mr = ibv_reg_mr(ctx->pd, buf, size, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);
+    if (mr->mr == NULL) {
+        LOG_ERR("rdma_mr_reg_external failed: ibv_reg_mr failed");
+        return -1;
+    }
+    mr->buf = buf;
+    mr->size = size;
+    mr->owns_buf = 0;
     return 0;
 }
 
@@ -37,6 +58,7 @@ void rdma_mr_dereg(rdma_mr_t *mr) {
     if (mr->mr != NULL && ibv_dereg_mr(mr->mr) != 0) {
         LOG_ERR("failed to deregister memory region");
     }
-    free(mr->buf);
+    if (mr->owns_buf)
+        free(mr->buf);
     mr->size = 0;
 }
