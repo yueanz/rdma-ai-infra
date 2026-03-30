@@ -32,7 +32,7 @@ static int recv_all(int fd, void *buf, size_t len) {
 }
 
 int rdma_exchange_info_server(rdma_qp_t *qp, int port) {
-    int server_fd = -1, client_fd = -1, opt = 1, ret = -1;
+    int listen_fd = -1, conn_fd = -1, opt = 1, ret = -1;
     struct sockaddr_in addr = {0};
 
     if (qp == NULL) {
@@ -44,50 +44,50 @@ int rdma_exchange_info_server(rdma_qp_t *qp, int port) {
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = INADDR_ANY;
 
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) {
+    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_fd < 0) {
         LOG_ERR("socket failed");
         goto out;
     }
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
         LOG_INFO("setsockopt failed");
 
-    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         LOG_ERR("bind failed");
         goto out;
     }
-    if (listen(server_fd, 1) < 0) {
+    if (listen(listen_fd, 1) < 0) {
         LOG_ERR("listen failed");
         goto out;
     }
 
-    client_fd = accept(server_fd, NULL, NULL);
-    if (client_fd < 0) {
+    conn_fd = accept(listen_fd, NULL, NULL);
+    if (conn_fd < 0) {
         LOG_ERR("accept failed");
         goto out;
     }
 
-    if (send_all(client_fd, &qp->local, sizeof(rdma_conn_info_t)) != 0) {
+    if (send_all(conn_fd, &qp->local, sizeof(rdma_conn_info_t)) != 0) {
         LOG_ERR("send_all failed");
         goto out;
     }
 
-    if (recv_all(client_fd, &qp->remote, sizeof(rdma_conn_info_t)) != 0) {
+    if (recv_all(conn_fd, &qp->remote, sizeof(rdma_conn_info_t)) != 0) {
         LOG_ERR("recv_all failed");
         goto out;
     }
 
     ret = 0;
 out:
-    if (server_fd >= 0)
-        close(server_fd);
-    if (client_fd >= 0)
-        close(client_fd);
+    if (listen_fd >= 0)
+        close(listen_fd);
+    if (conn_fd >= 0)
+        close(conn_fd);
     return ret;
 }
 
 int rdma_exchange_info_client(rdma_qp_t *qp, const char *server_ip, int port) {
-    int server_fd = -1, ret = -1;
+    int conn_fd = -1, ret = -1;
     struct sockaddr_in addr = {0};
     if (qp == NULL) {
         LOG_ERR("rdma queue pair is null");
@@ -105,30 +105,30 @@ int rdma_exchange_info_client(rdma_qp_t *qp, const char *server_ip, int port) {
         return -1;
     }
 
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) {
+    conn_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (conn_fd < 0) {
         LOG_ERR("socket failed");
         goto out;
     }
 
-    if (connect(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    if (connect(conn_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         LOG_ERR("connect failed");
         goto out;
     }
 
-    if (recv_all(server_fd, &qp->remote, sizeof(rdma_conn_info_t)) != 0) {
+    if (recv_all(conn_fd, &qp->remote, sizeof(rdma_conn_info_t)) != 0) {
         LOG_ERR("recv_all failed");
         goto out;
     }
 
-    if (send_all(server_fd, &qp->local, sizeof(rdma_conn_info_t)) != 0) {
+    if (send_all(conn_fd, &qp->local, sizeof(rdma_conn_info_t)) != 0) {
         LOG_ERR("send_all failed");
         goto out;
     }
 
     ret = 0;
 out:
-    if (server_fd >= 0)
-        close(server_fd);
+    if (conn_fd >= 0)
+        close(conn_fd);
     return ret;
 }
