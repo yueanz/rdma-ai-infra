@@ -131,4 +131,5 @@ void rdma_qp_destroy(rdma_qp_t *qp) {
     if (qp->qp && ibv_destroy_qp(qp->qp) != 0) {
         LOG_ERR("destroy queue pair failed");
     }
+    memset(qp, 0, sizeof(*qp));
 }

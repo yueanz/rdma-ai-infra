@@ -61,4 +61,5 @@ void rdma_mr_dereg(rdma_mr_t *mr) {
     if (mr->owns_buf)
         free(mr->buf);
     mr->size = 0;
+    memset(mr, 0, sizeof(*mr));
 }

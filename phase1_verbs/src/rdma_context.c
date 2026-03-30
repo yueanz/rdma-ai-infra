@@ -52,5 +52,6 @@ void rdma_ctx_destroy(rdma_ctx_t *ctx) {
     }
     if (ctx->ctx != NULL && ibv_close_device (ctx->ctx) != 0) {
         LOG_ERR("failed to release device");
-    }    
+    }
+    memset(ctx, 0, sizeof(*ctx));
 }
