@@ -87,4 +87,4 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp);
 int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size);
 int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size);
 int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint32_t send_flags);
-int rdma_poll_cq(rdma_ctx_t *ctx);
+int rdma_poll_cq(rdma_ctx_t *ctx, uint64_t *wr_id);

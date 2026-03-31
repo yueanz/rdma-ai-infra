@@ -139,7 +139,7 @@ int main(int argc, char *argv[]) {
                 LOG_ERR("rdma post write failed");
                 goto out;
             }
-            if (rdma_poll_cq(&ctx) != 0) {
+            if (rdma_poll_cq(&ctx, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }

@@ -122,7 +122,7 @@ int main(int argc, char *argv[]) {
                 LOG_ERR("rdma post recv failed");
                 goto out;
             }
-            if (rdma_poll_cq(&ctx) != 0) {
+            if (rdma_poll_cq(&ctx, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
@@ -130,7 +130,7 @@ int main(int argc, char *argv[]) {
                 LOG_ERR("rdma post send failed");
                 goto out;
             }
-            if (rdma_poll_cq(&ctx) != 0) {
+            if (rdma_poll_cq(&ctx, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
@@ -154,12 +154,12 @@ int main(int argc, char *argv[]) {
                 goto out;
             }
             // send completed
-            if (rdma_poll_cq(&ctx) != 0) {
+            if (rdma_poll_cq(&ctx, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
             // recv completed
-            if (rdma_poll_cq(&ctx) != 0) {
+            if (rdma_poll_cq(&ctx, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }

@@ -96,7 +96,7 @@ int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint32_t send_f
     return 0;
 }
 
-int rdma_poll_cq(rdma_ctx_t *ctx) {
+int rdma_poll_cq(rdma_ctx_t *ctx, uint64_t *wr_id) {
     int n;
     struct ibv_wc wc = {0};
 
@@ -114,6 +114,9 @@ int rdma_poll_cq(rdma_ctx_t *ctx) {
             if (wc.status != IBV_WC_SUCCESS) {
                 LOG_ERR("work completion error: %s", ibv_wc_status_str(wc.status));
                 return -1;
+            }
+            if (wr_id != NULL) {
+                *wr_id = wc.wr_id;
             }
             return 0;
         }
