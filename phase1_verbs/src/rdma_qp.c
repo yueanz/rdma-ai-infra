@@ -6,8 +6,8 @@
 int rdma_qp_create(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     struct ibv_qp_init_attr qp_init_attr  = {0};
 
-    if (ctx == NULL) {
-        LOG_ERR("rdma context is null");
+    if (!ctx || !ctx->pd || !ctx->cq || !ctx->ctx) {
+        LOG_ERR("rdma_qp_create failed: ctx not init");
         return -1;
     }
     if (qp == NULL) {
@@ -49,7 +49,7 @@ int rdma_qp_init(rdma_ctx_t *ctx, rdma_qp_t *qp) {
         LOG_ERR("rdma context is null");
         return -1;
     }
-    if (qp == NULL) {
+    if (qp == NULL || qp->qp == NULL) {
         LOG_ERR("rdma queue pair is null");
         return -1;
     }
@@ -78,8 +78,8 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
         LOG_ERR("rdma context is null");
         return -1;
     }
-    if (qp == NULL) {
-        LOG_ERR("rdma queue pair is null");
+    if (qp == NULL || qp->qp == NULL) {
+        LOG_ERR("rdma_qp_connect failed: qp or qp->qp is null");
         return -1;
     }
 

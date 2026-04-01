@@ -5,8 +5,8 @@
 int rdma_mr_reg(rdma_ctx_t *ctx, rdma_mr_t *mr, size_t size) {
     void *buf;
 
-    if (ctx == NULL) {
-        LOG_ERR("rdma context is null");
+    if (ctx == NULL || ctx->pd == NULL) {
+        LOG_ERR("rdma_mr_reg failed: ctx or ctx->pd is null");
         return -1;
     }
     if (mr == NULL) {
@@ -35,8 +35,12 @@ int rdma_mr_reg_external(rdma_ctx_t *ctx, rdma_mr_t *mr, void *buf, size_t size)
         LOG_ERR("rdma_mr_reg_external failed: size is 0");
         return -1;
     }
-    if (ctx == NULL || mr == NULL || buf == NULL) {
-        LOG_ERR("rdma_mr_reg_external failed: ctx is null or mr is null or buf is null");
+    if (ctx == NULL || ctx->pd == NULL) {
+        LOG_ERR("rdma_mr_reg_external failed: ctx or ctx->pd is null");
+        return -1;
+    }
+    if (mr == NULL || buf == NULL) {
+        LOG_ERR("rdma_mr_reg_external failed: mr or buf is null");
         return -1;
     }
     mr->mr = ibv_reg_mr(ctx->pd, buf, size, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);

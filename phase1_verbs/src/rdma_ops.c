@@ -6,8 +6,12 @@ int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size) {
     struct ibv_send_wr wr = {0};
     struct ibv_send_wr *bad_wr = NULL;
 
-    if (qp == NULL || mr == NULL) {
-        LOG_ERR("queue pair or memory region is null");
+    if (qp == NULL || qp->qp == NULL) {
+        LOG_ERR("rdma_post_send failed: qp or qp->qp is null");
+        return -1;
+    }
+    if (mr == NULL || mr->mr == NULL) {
+        LOG_ERR("rdma_post_send failed: mr or mr->mr is null");
         return -1;
     }
     if (size == 0 || size > mr->size) {
@@ -37,8 +41,12 @@ int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size) {
     struct ibv_recv_wr wr = {0};
     struct ibv_recv_wr *bad_wr = NULL;
 
-    if (qp == NULL || mr == NULL) {
-        LOG_ERR("queue pair or memory region is null");
+    if (qp == NULL || qp->qp == NULL) {
+        LOG_ERR("rdma_post_recv failed: qp or qp->qp is null");
+        return -1;
+    }
+    if (mr == NULL || mr->mr == NULL) {
+        LOG_ERR("rdma_post_recv failed: mr or mr->mr is null");
         return -1;
     }
     if (size == 0 || size > mr->size) {
@@ -67,8 +75,12 @@ int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint32_t send_f
     struct ibv_send_wr wr = {0};
     struct ibv_send_wr *bad_wr = NULL;
 
-    if (qp == NULL || mr == NULL) {
-        LOG_ERR("queue pair or memory region is null");
+    if (qp == NULL || qp->qp == NULL) {
+        LOG_ERR("rdma_post_write failed: qp or qp->qp is null");
+        return -1;
+    }
+    if (mr == NULL || mr->mr == NULL) {
+        LOG_ERR("rdma_post_write failed: mr or mr->mr is null");
         return -1;
     }
     if (size == 0 || size > mr->size) {
@@ -100,8 +112,8 @@ int rdma_poll_cq(rdma_ctx_t *ctx, uint64_t *wr_id) {
     int n;
     struct ibv_wc wc = {0};
 
-    if (ctx == NULL) {
-        LOG_ERR("rdma context is null");
+    if (ctx == NULL || ctx->cq == NULL) {
+        LOG_ERR("rdma_poll_cq failed: ctx or ctx->cq is null");
         return -1;
     }
     while (1) {
