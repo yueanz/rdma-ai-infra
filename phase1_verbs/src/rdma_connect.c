@@ -67,12 +67,12 @@ int rdma_exchange_info_server(rdma_qp_t *qp, int port) {
         goto out;
     }
 
-    if (send_all(conn_fd, &qp->local, sizeof(rdma_conn_info_t)) != 0) {
+    if (send_all(conn_fd, &qp->local, sizeof(qp->local)) != 0) {
         LOG_ERR("send_all failed");
         goto out;
     }
 
-    if (recv_all(conn_fd, &qp->remote, sizeof(rdma_conn_info_t)) != 0) {
+    if (recv_all(conn_fd, &qp->remote, sizeof(qp->remote)) != 0) {
         LOG_ERR("recv_all failed");
         goto out;
     }
@@ -116,12 +116,12 @@ int rdma_exchange_info_client(rdma_qp_t *qp, const char *server_ip, int port) {
         goto out;
     }
 
-    if (recv_all(conn_fd, &qp->remote, sizeof(rdma_conn_info_t)) != 0) {
+    if (recv_all(conn_fd, &qp->remote, sizeof(qp->remote)) != 0) {
         LOG_ERR("recv_all failed");
         goto out;
     }
 
-    if (send_all(conn_fd, &qp->local, sizeof(rdma_conn_info_t)) != 0) {
+    if (send_all(conn_fd, &qp->local, sizeof(qp->local)) != 0) {
         LOG_ERR("send_all failed");
         goto out;
     }
