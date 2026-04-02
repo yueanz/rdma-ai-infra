@@ -135,7 +135,7 @@ int main(int argc, char *argv[]) {
         for (i = 0; i < cfg.iters; i++) {
             *doorbell = 1;
             start = time_now_ns();
-            if (rdma_post_write(&qp, &mr, cfg.size, IBV_SEND_SIGNALED) != 0) {
+            if (rdma_post_write(&qp, &mr, cfg.size, IBV_SEND_SIGNALED, qp.remote.addr, qp.remote.rkey) != 0) {
                 LOG_ERR("rdma post write failed");
                 goto out;
             }

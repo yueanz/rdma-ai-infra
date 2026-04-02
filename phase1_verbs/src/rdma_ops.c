@@ -1,7 +1,7 @@
 #include "rdma_common.h"
 #include "logging.h"
 
-int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size) {
+int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id) {
     struct ibv_sge sge = {0};
     struct ibv_send_wr wr = {0};
     struct ibv_send_wr *bad_wr = NULL;
@@ -23,7 +23,7 @@ int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size) {
     sge.length = size;
     sge.lkey = mr->mr->lkey;
 
-    wr.wr_id = 1;
+    wr.wr_id = id;
     wr.sg_list = &sge;
     wr.num_sge = 1;
     wr.opcode = IBV_WR_SEND;
@@ -36,7 +36,7 @@ int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size) {
     return 0;
 }
 
-int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size) {
+int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id) {
     struct ibv_sge sge = {0};
     struct ibv_recv_wr wr = {0};
     struct ibv_recv_wr *bad_wr = NULL;
@@ -58,7 +58,7 @@ int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size) {
     sge.length = size;
     sge.lkey = mr->mr->lkey;
 
-    wr.wr_id = 1;
+    wr.wr_id = id;
     wr.sg_list = &sge;
     wr.num_sge = 1;
 
@@ -70,7 +70,8 @@ int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size) {
     return 0;
 }
 
-int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint32_t send_flags) {
+int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size,
+                    uint32_t send_flags, uint64_t remote_addr, uint32_t rkey) {
     struct ibv_sge sge = {0};
     struct ibv_send_wr wr = {0};
     struct ibv_send_wr *bad_wr = NULL;
@@ -97,8 +98,8 @@ int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint32_t send_f
     wr.num_sge = 1;
     wr.opcode = IBV_WR_RDMA_WRITE;
     wr.send_flags = send_flags;
-    wr.wr.rdma.remote_addr = qp->remote.addr;
-    wr.wr.rdma.rkey = qp->remote.rkey;
+    wr.wr.rdma.remote_addr = remote_addr;
+    wr.wr.rdma.rkey = rkey;
 
     if (ibv_post_send(qp->qp, &wr, &bad_wr) != 0) {
         LOG_ERR("ibv post send failed");

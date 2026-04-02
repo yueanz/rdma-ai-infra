@@ -118,7 +118,7 @@ int main(int argc, char *argv[]) {
     if (cfg.server_ip == NULL) {
         // server side
         for (i = 0; i < cfg.iters; i++) {
-            if (rdma_post_recv(&qp, &mr, cfg.size) != 0) {
+            if (rdma_post_recv(&qp, &mr, cfg.size, 1) != 0) {
                 LOG_ERR("rdma post recv failed");
                 goto out;
             }
@@ -126,7 +126,7 @@ int main(int argc, char *argv[]) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
-            if (rdma_post_send(&qp, &mr, cfg.size) != 0) {
+            if (rdma_post_send(&qp, &mr, cfg.size, 1) != 0) {
                 LOG_ERR("rdma post send failed");
                 goto out;
             }
@@ -144,12 +144,12 @@ int main(int argc, char *argv[]) {
         }
 
         for (i = 0; i < cfg.iters; i++) {
-            if (rdma_post_recv(&qp, &mr, cfg.size) != 0) {
+            if (rdma_post_recv(&qp, &mr, cfg.size, 1) != 0) {
                 LOG_ERR("rdma post recv failed");
                 goto out;
             }
             start = time_now_ns();
-            if (rdma_post_send(&qp, &mr, cfg.size) != 0) {
+            if (rdma_post_send(&qp, &mr, cfg.size, 1) != 0) {
                 LOG_ERR("rdma post send failed");
                 goto out;
             }

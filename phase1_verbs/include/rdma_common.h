@@ -84,7 +84,8 @@ void rdma_qp_destroy(rdma_qp_t *qp);
 int rdma_exchange_info_server(rdma_qp_t *qp, int port);
 int rdma_exchange_info_client(rdma_qp_t *qp, const char *server_ip, int port);
 int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp);
-int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size);
-int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size);
-int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint32_t send_flags);
+int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id);
+int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id);
+int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size,
+                    uint32_t send_flags, uint64_t remote_addr, uint32_t rkey);
 int rdma_poll_cq(rdma_ctx_t *ctx, uint64_t *wr_id);
