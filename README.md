@@ -85,6 +85,11 @@ rdma-ai-infra/
 │       ├── kv_bench.cpp             # small vs large object latency
 │       └── inference_pattern.cpp    # prefill write + decode read pattern
 │
+├── tests/                           # Correctness tests (separate from bench)
+│   ├── test_mr.c                    # MR register/deregister + content verify
+│   ├── test_qp_connect.c            # QP build + send/recv correctness
+│   └── test_transport.cpp           # RDMA vs TCP backend same output
+│
 ├── scripts/
 │   ├── setup_softroce.sh            # modprobe rdma_rxe + bind to eth0
 │   └── run_bench.sh
