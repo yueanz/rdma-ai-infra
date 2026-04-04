@@ -137,10 +137,6 @@ int TcpTransport::write_async(const BufferHandle *local, uint64_t remote_addr,
 }
 
 int TcpTransport::poll(uint64_t *completed_id) {
-    if (completed_id == nullptr) {
-        LOG_ERR("tcp poll failed: completed_id is null");
-        return -1;
-    }
     return 0;
 }
 

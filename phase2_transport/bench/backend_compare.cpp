@@ -87,7 +87,7 @@ int run_server_sendrecv(Transport *t, Config &cfg) {
     ScopedBuffer sb(t, buf.data(), len);
 
     // pre-post recv before accept so QP is ready when client sends
-    if (t->recv_async(&sb.h, len, 1) != 0) {
+    if (cfg.is_rdma && t->recv_async(&sb.h, len, 1) != 0) {
         LOG_ERR("run_server_sendrecv failed: recv_async failed");
         return -1;
     }
@@ -140,16 +140,17 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
     ScopedBuffer sb(t, buf.data(), len);
     
     for (int i = 0; i < cfg.iters; i++) {
-        if (t->recv_async(&sb.h, len, 1) != 0) {
-            LOG_ERR("run_client_sendrecv failed: recv_async failed");
-            return -1;
-        }
-        
         start = time_now_ns();
         if (t->send_async(&sb.h, len, 1) != 0) {
             LOG_ERR("run_client_sendrecv failed: send_async failed");
             return -1;
         }
+
+        if (t->recv_async(&sb.h, len, 1) != 0) {
+            LOG_ERR("run_client_sendrecv failed: recv_async failed");
+            return -1;
+        }
+    
         // wait for send completion
         if (t->poll(nullptr) != 0) {
             LOG_ERR("run_client_sendrecv failed: poll failed");
