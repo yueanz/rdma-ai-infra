@@ -1,5 +1,6 @@
 #include "rdma_common.h"
 #include "logging.h"
+#include <sched.h>
 
 int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id) {
     struct ibv_sge sge = {0};
@@ -133,7 +134,7 @@ int rdma_poll_cq(rdma_ctx_t *ctx, uint64_t *wr_id) {
             }
             return 0;
         }
-        __builtin_ia32_pause();
+        sched_yield();
     }
     return 0;
 }

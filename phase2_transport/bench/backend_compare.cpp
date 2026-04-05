@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <memory>
 #include "timing.h"
+#include <sched.h>
 
 struct Config
 {
@@ -240,7 +241,7 @@ int run_server_write(Transport *t, Config &cfg) {
     volatile uint8_t *doorbell = (uint8_t *)sb.h.addr + cfg.size - 1;
     for (int i = 0; i < cfg.iters; i++) {
         while (*doorbell == 0)
-            __builtin_ia32_pause();
+            sched_yield();
         *doorbell = 0;
     }
 
