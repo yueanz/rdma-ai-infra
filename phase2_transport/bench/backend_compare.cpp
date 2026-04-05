@@ -238,11 +238,19 @@ int run_server_write(Transport *t, Config &cfg) {
         return -1;
     }
 
-    volatile uint8_t *doorbell = (uint8_t *)sb.h.addr + cfg.size - 1;
-    for (int i = 0; i < cfg.iters; i++) {
-        while (*doorbell == 0)
-            sched_yield();
-        *doorbell = 0;
+    if (cfg.is_rdma) {
+        // RDMA: doorbell polling
+        volatile uint8_t *doorbell = (uint8_t *)sb.h.addr + cfg.size - 1;
+        for (int i = 0; i < cfg.iters; i++) {
+            while (*doorbell == 0)
+                sched_yield();
+            *doorbell = 0;
+        }
+    } else {
+        // TCP: explicit recv
+        for (int i = 0; i < cfg.iters; i++) {
+            t->recv_async(&sb.h, len, 1);
+        }
     }
 
     return 0;
