@@ -165,6 +165,7 @@ int RdmaTransport::connect(const char *host, int port) {
 
     is_server_ = false;
     host_ = host;
+    port_ = port;
     return 0;
 }
 
