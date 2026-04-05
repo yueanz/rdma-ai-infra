@@ -12,7 +12,7 @@ struct Config
     std::string server_ip;
     int port = 12345;
     int iters = 1000;
-    int size = 64;
+    int size = 4096;
     bool is_rdma = false;
 };
 
@@ -80,6 +80,19 @@ static void print_latencies(std::vector<uint64_t>& latencies, int iters) {
         ns_to_us(latencies[iters - 1]));
 }
 
+static void print_bandwidth(uint64_t total_bytes, uint64_t elapsed_ns) {
+    double elapsed_ms = elapsed_ns / 1e6;
+    double gbps       = (double)total_bytes * 8 / (elapsed_ns / 1e9) / 1e9;
+    double GBps       = (double)total_bytes / (elapsed_ns / 1e9) / (1024.0 * 1024 * 1024);
+
+    printf("\n--- Bandwidth Results ---\n");
+    printf("  transferred : %lu bytes (%.2f MB)\n",
+           total_bytes, total_bytes / (1024.0 * 1024));
+    printf("  elapsed     : %.2f ms\n", elapsed_ms);
+    printf("  throughput  : %.2f GB/s  /  %.2f Gbps\n", GBps, gbps);
+    printf("-------------------------\n");
+}
+
 int run_server_sendrecv(Transport *t, Config &cfg) {
     int len = cfg.size;
     std::vector<char> buf(len);
@@ -143,8 +156,6 @@ int run_server_sendrecv(Transport *t, Config &cfg) {
     return 0;
 }
 
-
-
 int run_client_sendrecv(Transport *t, Config &cfg) {
     uint64_t start;
     int len = cfg.size;
@@ -163,6 +174,7 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
 
     ScopedBuffer sb(t, buf.data(), len);
     
+    uint64_t t0 = time_now_ns();
     for (int i = 0; i < cfg.iters; i++) {
         start = time_now_ns();
         if (t->send_async(&sb.h, len, 1) != 0) {
@@ -189,7 +201,9 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
         latencies[i] = time_elapsed_ns(start, time_now_ns());
     }
 
+    uint64_t total_time = time_elapsed_ns(t0, time_now_ns());
     print_latencies(latencies, cfg.iters);
+    print_bandwidth((uint64_t)cfg.size*cfg.iters, total_time);
     return 0;
 }
 
@@ -257,6 +271,7 @@ int run_client_write(Transport *t, Config &cfg) {
         return -1;
     }
 
+    uint64_t t0 = time_now_ns();
     for (int i = 0; i < cfg.iters; i++) {
         buf[len-1] = 1;  // set doorbell in local buf
         start = time_now_ns();
@@ -271,7 +286,9 @@ int run_client_write(Transport *t, Config &cfg) {
         latencies[i] = time_elapsed_ns(start, time_now_ns());
     }
 
+    uint64_t total_time = time_elapsed_ns(t0, time_now_ns());
     print_latencies(latencies, cfg.iters);
+    print_bandwidth((uint64_t)cfg.size*cfg.iters, total_time);
     return 0;
 }
 
@@ -285,13 +302,12 @@ int main(int argc, char *argv[]) {
 
     try {
         bool is_server = cfg.server_ip.empty();
-
         // sendrecv
         {
             std::unique_ptr<Transport> t(
                 cfg.is_rdma ? create_rdma_transport() : create_tcp_transport()
             );
-            printf("=== send/recv ===\n");
+            printf("=== send/recv [%s] ===\n", cfg.is_rdma ? "rdma" : "tcp");
             if (is_server) {
                 if (run_server_sendrecv(t.get(), cfg) != 0) {
                     LOG_ERR("run_server_sendrecv failed");
@@ -305,13 +321,12 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
-        
         // write
         {
             std::unique_ptr<Transport> t(
                 cfg.is_rdma ? create_rdma_transport() : create_tcp_transport()
             );
-            printf("=== write ===\n");
+            printf("=== write [%s] ===\n", cfg.is_rdma ? "rdma" : "tcp");
             if (is_server) {
                 if (run_server_write(t.get(), cfg) != 0) {
                     LOG_ERR("run_server_write failed");
