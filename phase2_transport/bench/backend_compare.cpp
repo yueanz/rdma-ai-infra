@@ -328,6 +328,8 @@ int main(int argc, char *argv[]) {
                 cfg.is_rdma ? create_rdma_transport() : create_tcp_transport()
             );
             printf("=== write [%s] ===\n", cfg.is_rdma ? "rdma" : "tcp");
+            // write — use port+2 to avoid TIME_WAIT conflict with sendrecv
+            cfg.port += 2;
             if (is_server) {
                 if (run_server_write(t.get(), cfg) != 0) {
                     LOG_ERR("run_server_write failed");
@@ -339,6 +341,7 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
             }
+            cfg.port -= 2;  // restore
         }
     } catch (const std::exception &e) {
         fprintf(stderr, "error: %s\n", e.what());
