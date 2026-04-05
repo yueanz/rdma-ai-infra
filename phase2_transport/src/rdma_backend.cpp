@@ -112,7 +112,8 @@ int RdmaTransport::write_async(const BufferHandle *local, uint64_t remote_addr,
         LOG_ERR("rdma write_async failed: local is nullptr");
         return -1;
     }
-    if (rdma_post_write(&qp_, (rdma_mr_t*)local->priv, len, IBV_SEND_SIGNALED, remote_addr, rkey) != 0) {
+    if (rdma_post_write(&qp_, (rdma_mr_t*)local->priv, len, IBV_SEND_SIGNALED,
+                            remote_addr, rkey, id) != 0) {
         LOG_ERR("rdma write_async failed: rdma_post_write failed");
         return -1;
     }

@@ -71,7 +71,7 @@ int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id) {
 }
 
 int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size,
-                    uint32_t send_flags, uint64_t remote_addr, uint32_t rkey) {
+                    uint32_t send_flags, uint64_t remote_addr, uint32_t rkey, uint64_t id) {
     struct ibv_sge sge = {0};
     struct ibv_send_wr wr = {0};
     struct ibv_send_wr *bad_wr = NULL;
@@ -93,7 +93,7 @@ int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size,
     sge.length = size;
     sge.lkey = mr->mr->lkey;
 
-    wr.wr_id = 1;
+    wr.wr_id = id;
     wr.sg_list = &sge;
     wr.num_sge = 1;
     wr.opcode = IBV_WR_RDMA_WRITE;

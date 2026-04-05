@@ -31,7 +31,7 @@ static int recv_all(int fd, void *buf, size_t len) {
     return 0;
 }
 
-TcpTransport::TcpTransport() : fd_(-1), listen_fd_(-1) {}
+TcpTransport::TcpTransport() : fd_(-1), listen_fd_(-1), is_server_(false) {}
 
 TcpTransport::~TcpTransport() {
     close();

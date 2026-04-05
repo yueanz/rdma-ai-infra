@@ -145,7 +145,8 @@ int main(int argc, char *argv[]) {
         for (i = 0; i < cfg.iters; i++) {
             *doorbell = 1;
             send_flags = ((i+1) % cfg.depth == 0 || i == cfg.iters-1) ? IBV_SEND_SIGNALED : 0;
-            if (rdma_post_write(&qp, &mr, cfg.size, send_flags, qp.remote.addr, qp.remote.rkey) != 0) {
+            if (rdma_post_write(&qp, &mr, cfg.size, send_flags,
+                            qp.remote.addr, qp.remote.rkey, 1) != 0) {
                 LOG_ERR("rdma post write failed");
                 goto out;
             }
