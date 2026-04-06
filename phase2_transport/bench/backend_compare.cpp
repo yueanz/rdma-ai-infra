@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <memory>
 #include "timing.h"
+#include "bench_utils.h"
 
 static constexpr int kWarmup = 20;
 
@@ -69,30 +70,6 @@ static int config_parse(int argc, char *argv[], Config *cfg) {
         }
     }
     return 0;
-}
-
-static void print_latencies(std::vector<uint64_t>& latencies, int iters) {
-    std::sort(latencies.begin(), latencies.end());
-    printf("latency (RTT)\n");
-    printf("%-10s %-10s %-10s %-10s\n", "min(us)", "median(us)", "p99(us)", "max(us)");
-    printf("%-10.2f %-10.2f %-10.2f %-10.2f\n",
-        ns_to_us(latencies[0]),
-        ns_to_us(latencies[iters / 2]),
-        ns_to_us(latencies[(int)(iters * 0.99)]),
-        ns_to_us(latencies[iters - 1]));
-}
-
-static void print_bandwidth(uint64_t total_bytes, uint64_t elapsed_ns) {
-    double elapsed_ms = elapsed_ns / 1e6;
-    double gbps       = (double)total_bytes * 8 / (elapsed_ns / 1e9) / 1e9;
-    double GBps       = (double)total_bytes / (elapsed_ns / 1e9) / (1024.0 * 1024 * 1024);
-
-    printf("\n--- Bandwidth Results ---\n");
-    printf("  transferred : %lu bytes (%.2f MB)\n",
-           total_bytes, total_bytes / (1024.0 * 1024));
-    printf("  elapsed     : %.2f ms\n", elapsed_ms);
-    printf("  throughput  : %.2f GB/s  /  %.2f Gbps\n", GBps, gbps);
-    printf("-------------------------\n");
 }
 
 int run_server_sendrecv(Transport *t, Config &cfg) {
@@ -207,8 +184,8 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
     }
 
     uint64_t total_time = time_elapsed_ns(t0, time_now_ns());
-    print_latencies(latencies, cfg.iters);
-    print_bandwidth((uint64_t)cfg.size*cfg.iters, total_time);
+    print_latency("send/recv latency (RTT)", latencies.data(), cfg.iters);
+    print_bandwidth("rdma send/recv throughput", (uint64_t)cfg.size*cfg.iters, total_time);
     return 0;
 }
 
@@ -303,8 +280,8 @@ int run_client_write(Transport *t, Config &cfg) {
     }
 
     uint64_t total_time = time_elapsed_ns(t0, time_now_ns());
-    print_latencies(latencies, cfg.iters);
-    print_bandwidth((uint64_t)cfg.size*cfg.iters, total_time);
+    print_latency("rdma write latency (one-sided)", latencies.data(), cfg.iters);
+    print_bandwidth("rdma write throughput", (uint64_t)cfg.size*cfg.iters, total_time);
     return 0;
 }
 

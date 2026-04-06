@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include "rdma_common.h"
 #include "timing.h"
+#include "bench_utils.h"
 #include "logging.h"
 
 typedef struct config {
@@ -62,18 +63,6 @@ static void config_usage(const char *prog) {
     printf("  %s <server_ip> [--port <port>] [--iters <n>] [--size <bytes>] [--depth <n>]\n", prog);
 }
 
-static void print_bandwidth(uint64_t total_bytes, uint64_t elapsed_ns) {
-    double elapsed_ms = elapsed_ns / 1e6;
-    double gbps       = (double)total_bytes * 8 / (elapsed_ns / 1e9) / 1e9;
-    double GBps       = (double)total_bytes / (elapsed_ns / 1e9) / (1024.0 * 1024 * 1024);
-
-    printf("\n--- Bandwidth Results ---\n");
-    printf("  transferred : %lu bytes (%.2f MB)\n",
-           total_bytes, total_bytes / (1024.0 * 1024));
-    printf("  elapsed     : %.2f ms\n", elapsed_ms);
-    printf("  throughput  : %.2f GB/s  /  %.2f Gbps\n", GBps, gbps);
-    printf("-------------------------\n");
-}
 
 int main(int argc, char *argv[]) {
     int ret = 1, i;
@@ -129,16 +118,14 @@ int main(int argc, char *argv[]) {
         goto out;
     }
 
+    doorbell = (uint8_t *)mr.buf + cfg.size - 1;
+    *doorbell = 0;
     if (cfg.server_ip == NULL) {
         // server side: only wait for the last write's doorbell
-        doorbell = (uint8_t *)mr.buf + cfg.size - 1;
-        *doorbell = 0;
         while (*doorbell == 0)
             CPU_RELAX();
     } else {
         // client side: only set doorbell on the last iteration
-        doorbell = (uint8_t *)mr.buf + cfg.size - 1;
-        *doorbell = 0;
         start_time = time_now_ns();
         for (i = 0; i < cfg.iters; i++) {
             if (i == cfg.iters - 1) *doorbell = 1;
@@ -154,7 +141,7 @@ int main(int argc, char *argv[]) {
             }
         }
         total_time = time_elapsed_ns(start_time, time_now_ns());
-        print_bandwidth((uint64_t)cfg.size*cfg.iters, total_time);
+        print_bandwidth("rdma write throughput", (uint64_t)cfg.size*cfg.iters, total_time);
     }
 
     ret = 0;

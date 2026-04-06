@@ -3,6 +3,7 @@
 #include <string.h>
 #include "rdma_common.h"
 #include "timing.h"
+#include "bench_utils.h"
 #include "logging.h"
 
 typedef struct config {
@@ -167,13 +168,7 @@ int main(int argc, char *argv[]) {
         }
 
         qsort(latencies, cfg.iters, sizeof(uint64_t), cmp_u64);
-        printf("latency (RTT)\n");
-        printf("%-10s %-10s %-10s %-10s\n", "min(us)", "median(us)", "p99(us)", "max(us)");
-        printf("%-10.2f %-10.2f %-10.2f %-10.2f\n",
-            ns_to_us(latencies[0]),
-            ns_to_us(latencies[cfg.iters / 2]),
-            ns_to_us(latencies[(int)(cfg.iters * 0.99)]),
-            ns_to_us(latencies[cfg.iters - 1]));
+        print_latency("send/recv latency (RTT)", latencies, cfg.iters);
     }
 
     ret = 0;
