@@ -7,14 +7,15 @@ Built with `libibverbs` (no wrappers, no frameworks), progressing from raw verbs
 ## Phase Status
 
 - [x] **Phase 1** — RDMA Verbs Foundation (RC QP, MR, CQ, send/recv, RDMA write, benchmarks)
-- [ ] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends, async pipeline) — *in progress*
+- [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends, send/recv + write benchmarks)
 - [ ] **Phase 3** — Ring All-Reduce (chunked pipeline, RDMA write + doorbell sync, TCP vs RDMA)
 - [ ] **Phase 4b** — Remote KV Cache (RDMA-based, prefill/decode access pattern)
 
 ## Benchmark Results
 
-> Measured on SoftRoCE (rdma_rxe) over loopback, DigitalOcean 2GB VM, Ubuntu 22.04.
-> Real InfiniBand hardware would show ~1000x lower latency.
+> Measured on SoftRoCE (rdma_rxe) over loopback. SoftRoCE runs in-kernel over UDP — latency is not representative of real RDMA hardware (ConnectX NICs show ~1–3 μs). Numbers here validate correctness and relative ordering only.
+
+### Phase 1 — Raw Verbs (DigitalOcean 2GB VM, Ubuntu 22.04)
 
 | Benchmark | Min | Median | p99 |
 |---|---|---|---|
@@ -22,7 +23,18 @@ Built with `libibverbs` (no wrappers, no frameworks), progressing from raw verbs
 | `lat_rdma_write` (one-sided) | 4 μs | 6 μs | 45 μs |
 | `bw_rdma_write` (throughput) | — | 1.5 Gbps | — |
 
-**Key insight:** RDMA write is 300x lower latency than send/recv because it is one-sided — the receiver's CPU is not involved. Reliable delivery is guaranteed by the RC transport layer, not the application.
+**Key insight:** RDMA write is 300x lower latency than send/recv on SoftRoCE because it bypasses the kernel receive path. On real hardware the gap is even larger (~10x).
+
+### Phase 2 — Transport Abstraction (OCI VM, Oracle Linux, SoftRoCE)
+
+| Benchmark | Transport | Min | Median | p99 | Throughput |
+|---|---|---|---|---|---|
+| send/recv RTT | TCP | 20 μs | 22 μs | 44 μs | 1.4 Gbps |
+| send/recv RTT | RDMA | 25 μs | 2586 μs | 16035 μs | 0.01 Gbps |
+| write latency | TCP | 0.7 μs | 1.0 μs | 22 μs | 6.1 Gbps |
+| write latency | RDMA | 8.6 μs | 13 μs | 26 μs | 2.3 Gbps |
+
+> RDMA send/recv is slower than TCP on SoftRoCE due to the rxe kernel module overhead on the receive path. RDMA write is faster than send/recv because it is one-sided. On real RoCE/InfiniBand hardware, RDMA would outperform TCP significantly.
 
 ## Architecture
 
@@ -117,6 +129,7 @@ cmake .. && make
 ## Running Benchmarks
 
 ```bash
+# Phase 1
 cd build/phase1_verbs
 
 # Terminal 1 — server
@@ -132,6 +145,15 @@ cd build/phase1_verbs
 # Throughput
 ./bw_rdma_write --size 65536 --iters 10000 --depth 32
 ./bw_rdma_write 127.0.0.1 --size 65536 --iters 10000 --depth 32
+
+# Phase 2
+cd build/phase2_transport
+
+# Terminal 1 — server
+./backend_compare <rdma|tcp> <port>
+
+# Terminal 2 — client
+./backend_compare <rdma|tcp> <server_ip> <port>
 ```
 
 ## Environment
