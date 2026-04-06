@@ -8,6 +8,8 @@
 #include "timing.h"
 #include <sched.h>
 
+static constexpr int kWarmup = 20;
+
 struct Config
 {
     std::string server_ip;
@@ -122,7 +124,7 @@ int run_server_sendrecv(Transport *t, Config &cfg) {
         return -1;
     }
 
-    for (int i = 0; i < cfg.iters; i++) {
+    for (int i = 0; i < kWarmup + cfg.iters; i++) {
         if (cfg.is_rdma) {
             if (t->poll(nullptr) != 0) {
                 LOG_ERR("run_server_sendrecv failed: poll failed");
@@ -136,7 +138,7 @@ int run_server_sendrecv(Transport *t, Config &cfg) {
                 LOG_ERR("run_server_sendrecv failed: poll failed");
                 return -1;
             }
-            if (i + 1 < cfg.iters) {
+            if (i + 1 < kWarmup + cfg.iters) {
                 if (t->recv_async(&sb.h, len, 1) != 0) {
                     LOG_ERR("run_server_sendrecv failed: recv_async failed");
                     return -1;
@@ -174,9 +176,11 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
     }
 
     ScopedBuffer sb(t, buf.data(), len);
-    
-    uint64_t t0 = time_now_ns();
-    for (int i = 0; i < cfg.iters; i++) {
+
+    int total_iters = kWarmup + cfg.iters;
+    uint64_t t0;
+    for (int i = 0; i < total_iters; i++) {
+        if (i == kWarmup) t0 = time_now_ns();  // start timing after warmup
         start = time_now_ns();
         if (t->send_async(&sb.h, len, 1) != 0) {
             LOG_ERR("run_client_sendrecv failed: send_async failed");
@@ -193,13 +197,14 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
             LOG_ERR("run_client_sendrecv failed: recv_async failed");
             return -1;
         }
-    
+
         // wait for recv completion
         if (t->poll(nullptr) != 0) {
             LOG_ERR("run_client_sendrecv failed: poll failed");
             return -1;
         }
-        latencies[i] = time_elapsed_ns(start, time_now_ns());
+        if (i >= kWarmup)
+            latencies[i - kWarmup] = time_elapsed_ns(start, time_now_ns());
     }
 
     uint64_t total_time = time_elapsed_ns(t0, time_now_ns());
@@ -241,14 +246,14 @@ int run_server_write(Transport *t, Config &cfg) {
     if (cfg.is_rdma) {
         // RDMA: doorbell polling
         volatile uint8_t *doorbell = (uint8_t *)sb.h.addr + cfg.size - 1;
-        for (int i = 0; i < cfg.iters; i++) {
+        for (int i = 0; i < kWarmup + cfg.iters; i++) {
             while (*doorbell == 0)
                 sched_yield();
             *doorbell = 0;
         }
     } else {
         // TCP: explicit recv
-        for (int i = 0; i < cfg.iters; i++) {
+        for (int i = 0; i < kWarmup + cfg.iters; i++) {
             t->recv_async(&sb.h, len, 1);
         }
     }
@@ -280,11 +285,13 @@ int run_client_write(Transport *t, Config &cfg) {
         return -1;
     }
 
-    uint64_t t0 = time_now_ns();
-    for (int i = 0; i < cfg.iters; i++) {
+    int total_iters = kWarmup + cfg.iters;
+    uint64_t t0;
+    for (int i = 0; i < total_iters; i++) {
+        if (i == kWarmup) t0 = time_now_ns();  // start timing after warmup
         buf[len-1] = 1;  // set doorbell in local buf
         start = time_now_ns();
-        if (t->write_async(&sb.h, remote_addr, rkey,len, i) != 0) {
+        if (t->write_async(&sb.h, remote_addr, rkey, len, i) != 0) {
             LOG_ERR("run_client_write failed: write_async failed");
             return -1;
         }
@@ -292,7 +299,8 @@ int run_client_write(Transport *t, Config &cfg) {
             LOG_ERR("run_client_write failed: poll failed");
             return -1;
         }
-        latencies[i] = time_elapsed_ns(start, time_now_ns());
+        if (i >= kWarmup)
+            latencies[i - kWarmup] = time_elapsed_ns(start, time_now_ns());
     }
 
     uint64_t total_time = time_elapsed_ns(t0, time_now_ns());
