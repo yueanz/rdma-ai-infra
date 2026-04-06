@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <memory>
 #include "timing.h"
-#include <sched.h>
 
 static constexpr int kWarmup = 20;
 
@@ -248,7 +247,7 @@ int run_server_write(Transport *t, Config &cfg) {
         volatile uint8_t *doorbell = (uint8_t *)sb.h.addr + cfg.size - 1;
         for (int i = 0; i < kWarmup + cfg.iters; i++) {
             while (*doorbell == 0)
-                sched_yield();
+                CPU_RELAX();
             *doorbell = 0;
         }
     } else {

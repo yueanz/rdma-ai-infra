@@ -1,5 +1,4 @@
 #include <stdlib.h>
-#include <sched.h>
 #include "rdma_common.h"
 #include "timing.h"
 #include "logging.h"
@@ -131,20 +130,18 @@ int main(int argc, char *argv[]) {
     }
 
     if (cfg.server_ip == NULL) {
-        // server side
+        // server side: only wait for the last write's doorbell
         doorbell = (uint8_t *)mr.buf + cfg.size - 1;
         *doorbell = 0;
-        for (i = 0; i < cfg.iters; i++) {
-            while (*doorbell == 0)
-                sched_yield();
-            *doorbell = 0;
-        }
+        while (*doorbell == 0)
+            CPU_RELAX();
     } else {
-        // client side
+        // client side: only set doorbell on the last iteration
         doorbell = (uint8_t *)mr.buf + cfg.size - 1;
+        *doorbell = 0;
         start_time = time_now_ns();
         for (i = 0; i < cfg.iters; i++) {
-            *doorbell = 1;
+            if (i == cfg.iters - 1) *doorbell = 1;
             send_flags = ((i+1) % cfg.depth == 0 || i == cfg.iters-1) ? IBV_SEND_SIGNALED : 0;
             if (rdma_post_write(&qp, &mr, cfg.size, send_flags,
                             qp.remote.addr, qp.remote.rkey, 1) != 0) {

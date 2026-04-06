@@ -1,5 +1,4 @@
 #include <stdlib.h>
-#include <sched.h>
 #include "rdma_common.h"
 #include "timing.h"
 #include "logging.h"
@@ -121,7 +120,7 @@ int main(int argc, char *argv[]) {
         *doorbell = 0;
         for (i = 0; i < cfg.iters; i++) {
             while (*doorbell == 0)
-                sched_yield();
+                CPU_RELAX();
             *doorbell = 0;
         }
     } else {
