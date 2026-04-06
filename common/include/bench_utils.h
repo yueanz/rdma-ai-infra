@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include "timing.h"
 
+#define kWarmup 20
+
 /* Print latency results. samples must be sorted ascending. */
 static inline void print_latency(const char *label, uint64_t *samples, int n) {
     printf("\n--- %s ---\n", label);

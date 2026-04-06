@@ -8,8 +8,6 @@
 #include "timing.h"
 #include "bench_utils.h"
 
-static constexpr int kWarmup = 20;
-
 struct Config
 {
     std::string server_ip;
@@ -100,7 +98,8 @@ int run_server_sendrecv(Transport *t, Config &cfg) {
         return -1;
     }
 
-    for (int i = 0; i < kWarmup + cfg.iters; i++) {
+    int total_iters = kWarmup + cfg.iters;
+    for (int i = 0; i < total_iters; i++) {
         if (cfg.is_rdma) {
             if (t->poll(nullptr) != 0) {
                 LOG_ERR("run_server_sendrecv failed: poll failed");
@@ -114,7 +113,7 @@ int run_server_sendrecv(Transport *t, Config &cfg) {
                 LOG_ERR("run_server_sendrecv failed: poll failed");
                 return -1;
             }
-            if (i + 1 < kWarmup + cfg.iters) {
+            if (i + 1 < total_iters) {
                 if (t->recv_async(&sb.h, len, 1) != 0) {
                     LOG_ERR("run_server_sendrecv failed: recv_async failed");
                     return -1;

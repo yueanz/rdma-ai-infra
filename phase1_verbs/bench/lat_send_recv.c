@@ -17,7 +17,7 @@ static void config_init(config_t *cfg) {
     cfg->server_ip = NULL;
     cfg->port = 12345;
     cfg->iters = 1000;
-    cfg->size = 64;
+    cfg->size = 4096;
 }
 
 static int config_parse(int argc, char *argv[], config_t *cfg) {
@@ -116,9 +116,10 @@ int main(int argc, char *argv[]) {
         goto out;
     }
 
+    int total_iters = kWarmup + cfg.iters;
     if (cfg.server_ip == NULL) {
         // server side
-        for (i = 0; i < cfg.iters; i++) {
+        for (i = 0; i < total_iters; i++) {
             if (rdma_post_recv(&qp, &mr, cfg.size, 1) != 0) {
                 LOG_ERR("rdma post recv failed");
                 goto out;
@@ -144,7 +145,7 @@ int main(int argc, char *argv[]) {
             goto out;
         }
 
-        for (i = 0; i < cfg.iters; i++) {
+        for (i = 0; i < total_iters; i++) {
             if (rdma_post_recv(&qp, &mr, cfg.size, 1) != 0) {
                 LOG_ERR("rdma post recv failed");
                 goto out;
@@ -164,7 +165,8 @@ int main(int argc, char *argv[]) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
-            latencies[i] = time_elapsed_ns(start, time_now_ns());
+            if (i >= kWarmup)
+                latencies[i] = time_elapsed_ns(start, time_now_ns());
         }
 
         qsort(latencies, cfg.iters, sizeof(uint64_t), cmp_u64);

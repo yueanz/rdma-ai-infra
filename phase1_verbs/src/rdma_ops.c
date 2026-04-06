@@ -1,5 +1,6 @@
 #include "rdma_common.h"
 #include "logging.h"
+#include "timing.h"
 
 int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id) {
     struct ibv_sge sge = {0};

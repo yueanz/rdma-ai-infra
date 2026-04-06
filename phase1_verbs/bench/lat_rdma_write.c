@@ -15,7 +15,7 @@ static void config_init(config_t *cfg) {
     cfg->server_ip = NULL;
     cfg->port = 12345;
     cfg->iters = 1000;
-    cfg->size = 64;
+    cfg->size = 4096;
 }
 
 static int config_parse(int argc, char *argv[], config_t *cfg) {
@@ -115,11 +115,12 @@ int main(int argc, char *argv[]) {
         goto out;
     }
 
+    int total_iters = kWarmup + cfg.iters;
     if (cfg.server_ip == NULL) {
         // server side
         doorbell = (uint8_t *)mr.buf + cfg.size - 1;
         *doorbell = 0;
-        for (i = 0; i < cfg.iters; i++) {
+        for (i = 0; i < total_iters; i++) {
             while (*doorbell == 0)
                 CPU_RELAX();
             *doorbell = 0;
@@ -133,7 +134,7 @@ int main(int argc, char *argv[]) {
         }
 
         doorbell = (uint8_t *)mr.buf + cfg.size - 1;
-        for (i = 0; i < cfg.iters; i++) {
+        for (i = 0; i < total_iters; i++) {
             *doorbell = 1;
             start = time_now_ns();
             if (rdma_post_write(&qp, &mr, cfg.size, IBV_SEND_SIGNALED,
@@ -145,7 +146,8 @@ int main(int argc, char *argv[]) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
-            latencies[i] = time_elapsed_ns(start, time_now_ns());
+            if (i >= kWarmup)
+                latencies[i] = time_elapsed_ns(start, time_now_ns());
         }
         qsort(latencies, cfg.iters, sizeof(uint64_t), cmp_u64);
         print_latency("rdma write latency (one-sided)", latencies, cfg.iters);

@@ -16,7 +16,7 @@ static void config_init(config_t *cfg) {
     cfg->server_ip = NULL;
     cfg->port = 12345;
     cfg->iters = 1000;
-    cfg->size = 64;
+    cfg->size = 4096;
     cfg->depth = 16;
 }
 
@@ -66,7 +66,7 @@ static void config_usage(const char *prog) {
 
 int main(int argc, char *argv[]) {
     int ret = 1, i;
-    uint64_t start_time, total_time;
+    uint64_t t0, total_time;
     config_t cfg = {0};
     rdma_ctx_t ctx = {0};
     rdma_mr_t mr = {0};
@@ -118,6 +118,7 @@ int main(int argc, char *argv[]) {
         goto out;
     }
 
+    int total_iters = kWarmup + cfg.iters;
     doorbell = (uint8_t *)mr.buf + cfg.size - 1;
     *doorbell = 0;
     if (cfg.server_ip == NULL) {
@@ -126,9 +127,9 @@ int main(int argc, char *argv[]) {
             CPU_RELAX();
     } else {
         // client side: only set doorbell on the last iteration
-        start_time = time_now_ns();
-        for (i = 0; i < cfg.iters; i++) {
+        for (i = 0; i < total_iters; i++) {
             if (i == cfg.iters - 1) *doorbell = 1;
+            if (i == kWarmup) t0 = time_now_ns();  // start timing after warmup
             send_flags = ((i+1) % cfg.depth == 0 || i == cfg.iters-1) ? IBV_SEND_SIGNALED : 0;
             if (rdma_post_write(&qp, &mr, cfg.size, send_flags,
                             qp.remote.addr, qp.remote.rkey, 1) != 0) {
@@ -140,7 +141,7 @@ int main(int argc, char *argv[]) {
                 goto out;
             }
         }
-        total_time = time_elapsed_ns(start_time, time_now_ns());
+        total_time = time_elapsed_ns(t0, time_now_ns());
         print_bandwidth("rdma write throughput", (uint64_t)cfg.size*cfg.iters, total_time);
     }
 
