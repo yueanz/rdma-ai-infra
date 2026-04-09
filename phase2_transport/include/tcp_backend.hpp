@@ -11,9 +11,9 @@ public:
     int reg_buf(void *buf, size_t size, BufferHandle *out) override;
     void dereg_buf(BufferHandle *h) override;
 
-    int send_async(const BufferHandle *h, size_t len, uint64_t id) override;
-    int recv_async(BufferHandle *h, size_t len, uint64_t id) override;
-    int write_async(const BufferHandle *local, uint64_t remote_addr, uint32_t rkey,
+    int send_async(const BufferHandle *h, size_t offset, size_t len, uint64_t id) override;
+    int recv_async(BufferHandle *h, size_t offset, size_t len, uint64_t id) override;
+    int write_async(const BufferHandle *local, size_t offset, uint64_t remote_addr, uint32_t rkey,
                             size_t len, uint64_t id) override;
     int exchange_buf(const BufferHandle *local, uint64_t *remote_addr,
                             uint32_t *rkey) override;

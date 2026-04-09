@@ -35,12 +35,12 @@ public:
     virtual int reg_buf(void *buf, size_t size, BufferHandle *out) = 0;
     virtual void dereg_buf(BufferHandle *h) = 0;
 
-    virtual int send_async(const BufferHandle *h, size_t len, uint64_t id) = 0;
-    virtual int recv_async(BufferHandle *h, size_t len, uint64_t id) = 0;
+    virtual int send_async(const BufferHandle *h, size_t offset, size_t len, uint64_t id) = 0;
+    virtual int recv_async(BufferHandle *h, size_t offset, size_t len, uint64_t id) = 0;
 
     // One-sided write: local buffer → remote addr (RDMA only; TCP falls back to send)
     // remote_addr and rkey obtained from peer during handshake
-    virtual int write_async(const BufferHandle *local,
+    virtual int write_async(const BufferHandle *local, size_t offset,
                             uint64_t remote_addr, uint32_t rkey,
                             size_t len, uint64_t id) = 0;
 

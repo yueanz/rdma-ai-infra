@@ -2,7 +2,7 @@
 #include "logging.h"
 #include "timing.h"
 
-int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id) {
+int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id, size_t offset) {
     struct ibv_sge sge = {0};
     struct ibv_send_wr wr = {0};
     struct ibv_send_wr *bad_wr = NULL;
@@ -20,7 +20,7 @@ int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id) {
         return -1;
     }
 
-    sge.addr = (uintptr_t)mr->buf;
+    sge.addr = (uintptr_t)(mr->buf + offset);
     sge.length = size;
     sge.lkey = mr->mr->lkey;
 
@@ -37,7 +37,7 @@ int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id) {
     return 0;
 }
 
-int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id) {
+int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id, size_t offset) {
     struct ibv_sge sge = {0};
     struct ibv_recv_wr wr = {0};
     struct ibv_recv_wr *bad_wr = NULL;
@@ -55,7 +55,7 @@ int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id) {
         return -1;
     }
 
-    sge.addr = (uintptr_t)mr->buf;
+    sge.addr = (uintptr_t)(mr->buf + offset);
     sge.length = size;
     sge.lkey = mr->mr->lkey;
 
@@ -71,8 +71,8 @@ int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id) {
     return 0;
 }
 
-int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size,
-                    uint32_t send_flags, uint64_t remote_addr, uint32_t rkey, uint64_t id) {
+int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint32_t send_flags,
+                    uint64_t remote_addr, uint32_t rkey, uint64_t id, size_t offset) {
     struct ibv_sge sge = {0};
     struct ibv_send_wr wr = {0};
     struct ibv_send_wr *bad_wr = NULL;
@@ -90,7 +90,7 @@ int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size,
         return -1;
     }
 
-    sge.addr = (uintptr_t)mr->buf;
+    sge.addr = (uintptr_t)(mr->buf + offset);
     sge.length = size;
     sge.lkey = mr->mr->lkey;
 

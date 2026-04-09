@@ -56,7 +56,7 @@ void TcpTransport::dereg_buf(BufferHandle *h) {
     h->priv = nullptr;
 }
 
-int TcpTransport::send_async(const BufferHandle *h, size_t len, uint64_t id) {
+int TcpTransport::send_async(const BufferHandle *h, size_t offset, size_t len, uint64_t id) {
     if (h == nullptr || len == 0) {
         LOG_ERR("tcp send_async failed: h is null or len is 0");
         return -1;
@@ -70,7 +70,7 @@ int TcpTransport::send_async(const BufferHandle *h, size_t len, uint64_t id) {
         return -1;
     }
 
-    if (send_all(fd_, h->addr, len) != 0) {
+    if (send_all(fd_, h->addr + offset, len) != 0) {
         LOG_ERR("tcp send_async failed: send_all failed");
         return -1;
     }
@@ -78,7 +78,7 @@ int TcpTransport::send_async(const BufferHandle *h, size_t len, uint64_t id) {
     return 0;
 }
 
-int TcpTransport::recv_async(BufferHandle *h, size_t len, uint64_t id) {
+int TcpTransport::recv_async(BufferHandle *h, size_t offset, size_t len, uint64_t id) {
     if (h == nullptr || len == 0) {
         LOG_ERR("tcp recv_async failed: h is null or len is 0");
         return -1;
@@ -92,7 +92,7 @@ int TcpTransport::recv_async(BufferHandle *h, size_t len, uint64_t id) {
         return -1;
     }
 
-    if (recv_all(fd_, h->addr, len) != 0) {
+    if (recv_all(fd_, h->addr + offset, len) != 0) {
         LOG_ERR("tcp recv_async failed: recv_all failed");
         return -1;
     }
@@ -131,9 +131,9 @@ int TcpTransport::exchange_buf(const BufferHandle *local, uint64_t *remote_addr,
     return 0;
 }
 
-int TcpTransport::write_async(const BufferHandle *local, uint64_t remote_addr,
+int TcpTransport::write_async(const BufferHandle *local, size_t offset, uint64_t remote_addr,
                             uint32_t rkey, size_t len, uint64_t id) {
-    return send_async(local, len, id);
+    return send_async(local, offset, len, id);
 }
 
 int TcpTransport::poll(uint64_t *completed_id) {
