@@ -88,7 +88,7 @@ int run_server_sendrecv(Transport *t, Config &cfg) {
     ScopedBuffer sb(t, buf.data(), len);
 
     // pre-post recv before accept so QP is ready when client sends
-    if (cfg.is_rdma && t->recv_async(&sb.h, len, 1) != 0) {
+    if (cfg.is_rdma && t->recv_async(&sb.h, len, 1, 0) != 0) {
         LOG_ERR("run_server_sendrecv failed: recv_async failed");
         return -1;
     }
@@ -105,7 +105,7 @@ int run_server_sendrecv(Transport *t, Config &cfg) {
                 LOG_ERR("run_server_sendrecv failed: poll failed");
                 return -1;
             }
-            if (t->send_async(&sb.h, len, 1) != 0) {
+            if (t->send_async(&sb.h, len, 1, 0) != 0) {
                 LOG_ERR("run_server_sendrecv failed: send_async failed");
                 return -1;
             }
@@ -114,17 +114,17 @@ int run_server_sendrecv(Transport *t, Config &cfg) {
                 return -1;
             }
             if (i + 1 < total_iters) {
-                if (t->recv_async(&sb.h, len, 1) != 0) {
+                if (t->recv_async(&sb.h, len, 1, 0) != 0) {
                     LOG_ERR("run_server_sendrecv failed: recv_async failed");
                     return -1;
                 }
             }
         } else {
-            if (t->recv_async(&sb.h, len, 1) != 0) {
+            if (t->recv_async(&sb.h, len, 1, 0) != 0) {
                 LOG_ERR("run_server_sendrecv failed: recv_async failed");
                 return -1;
             }
-            if (t->send_async(&sb.h, len, 1) != 0) {
+            if (t->send_async(&sb.h, len, 1, 0) != 0) {
                 LOG_ERR("run_server_sendrecv failed: send_async failed");
                 return -1;
             }
@@ -157,7 +157,7 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
     for (int i = 0; i < total_iters; i++) {
         if (i == kWarmup) t0 = time_now_ns();  // start timing after warmup
         start = time_now_ns();
-        if (t->send_async(&sb.h, len, 1) != 0) {
+        if (t->send_async(&sb.h, len, 1, 0) != 0) {
             LOG_ERR("run_client_sendrecv failed: send_async failed");
             return -1;
         }
@@ -168,7 +168,7 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
             return -1;
         }
 
-        if (t->recv_async(&sb.h, len, 1) != 0) {
+        if (t->recv_async(&sb.h, len, 1, 0) != 0) {
             LOG_ERR("run_client_sendrecv failed: recv_async failed");
             return -1;
         }
@@ -229,7 +229,7 @@ int run_server_write(Transport *t, Config &cfg) {
     } else {
         // TCP: explicit recv
         for (int i = 0; i < kWarmup + cfg.iters; i++) {
-            t->recv_async(&sb.h, len, 1);
+            t->recv_async(&sb.h, len, 1, 0);
         }
     }
 
@@ -266,7 +266,7 @@ int run_client_write(Transport *t, Config &cfg) {
         if (i == kWarmup) t0 = time_now_ns();  // start timing after warmup
         buf[len-1] = 1;  // set doorbell in local buf
         start = time_now_ns();
-        if (t->write_async(&sb.h, remote_addr, rkey, len, i) != 0) {
+        if (t->write_async(&sb.h, remote_addr, rkey, len, i, 0) != 0) {
             LOG_ERR("run_client_write failed: write_async failed");
             return -1;
         }

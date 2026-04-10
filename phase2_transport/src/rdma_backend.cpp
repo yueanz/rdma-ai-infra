@@ -45,7 +45,7 @@ void RdmaTransport::dereg_buf(BufferHandle *h) {
     h->priv = nullptr;
 }
 
-int RdmaTransport::send_async(const BufferHandle *h,  size_t offset, size_t len, uint64_t id) {
+int RdmaTransport::send_async(const BufferHandle *h, size_t len, uint64_t id, size_t offset) {
     if (h == nullptr) {
         LOG_ERR("rdma send_async failed: h is nullptr");
         return -1;
@@ -57,7 +57,7 @@ int RdmaTransport::send_async(const BufferHandle *h,  size_t offset, size_t len,
     return 0;
 }
 
-int RdmaTransport::recv_async(BufferHandle *h, size_t offset, size_t len, uint64_t id) {
+int RdmaTransport::recv_async(BufferHandle *h, size_t len, uint64_t id, size_t offset) {
     if (h == nullptr) {
         LOG_ERR("rdma recv_async failed: h is nullptr");
         return -1;
@@ -106,8 +106,8 @@ int RdmaTransport::exchange_buf(const BufferHandle *local, uint64_t *remote_addr
     return 0;
 }
 
-int RdmaTransport::write_async(const BufferHandle *local, size_t offset, uint64_t remote_addr,
-                            uint32_t rkey, size_t len, uint64_t id) {
+int RdmaTransport::write_async(const BufferHandle *local, uint64_t remote_addr,
+                            uint32_t rkey, size_t len, uint64_t id, size_t offset) {
     if (local == nullptr) {
         LOG_ERR("rdma write_async failed: local is nullptr");
         return -1;
