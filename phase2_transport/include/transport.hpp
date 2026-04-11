@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 
 extern "C" {
 #include "logging.h"
@@ -57,6 +58,18 @@ public:
     virtual int listen(int port) = 0;
     virtual int accept() = 0;
     virtual void close() = 0;
+};
+
+struct ScopedBuffer {
+    Transport *t;
+    BufferHandle h;
+    ScopedBuffer(Transport *t, void *buf, size_t size) : t(t), h{} {
+        if (t->reg_buf(buf, size, &h) != 0)
+            throw std::runtime_error("reg_buf failed");
+    }
+    ~ScopedBuffer() {t->dereg_buf(&h);}
+    ScopedBuffer(const ScopedBuffer&) = delete;
+    ScopedBuffer& operator=(const ScopedBuffer&) = delete;
 };
 
 Transport *create_rdma_transport();

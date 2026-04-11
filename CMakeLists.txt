@@ -7,3 +7,4 @@ set(CMAKE_BUILD_TYPE Debug)
 
 add_subdirectory(phase1_verbs)
 add_subdirectory(phase2_transport)
+add_subdirectory(phase3_collective)

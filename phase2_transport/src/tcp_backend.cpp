@@ -70,7 +70,7 @@ int TcpTransport::send_async(const BufferHandle *h, size_t len, uint64_t id, siz
         return -1;
     }
 
-    if (send_all(fd_, h->addr + offset, len) != 0) {
+    if (send_all(fd_, (char*)h->addr + offset, len) != 0) {
         LOG_ERR("tcp send_async failed: send_all failed");
         return -1;
     }
@@ -92,7 +92,7 @@ int TcpTransport::recv_async(BufferHandle *h, size_t len, uint64_t id, size_t of
         return -1;
     }
 
-    if (recv_all(fd_, h->addr + offset, len) != 0) {
+    if (recv_all(fd_, (char*)h->addr + offset, len) != 0) {
         LOG_ERR("tcp recv_async failed: recv_all failed");
         return -1;
     }

@@ -17,18 +17,6 @@ struct Config
     bool is_rdma = false;
 };
 
-struct ScopedBuffer {
-    Transport *t;
-    BufferHandle h;
-    ScopedBuffer(Transport *t, void *buf, size_t size) : t(t), h{} {
-        if (t->reg_buf(buf, size, &h) != 0)
-            throw std::runtime_error("reg_buf failed");
-    }
-    ~ScopedBuffer() {t->dereg_buf(&h);}
-    ScopedBuffer(const ScopedBuffer&) = delete;
-    ScopedBuffer& operator=(const ScopedBuffer&) = delete;
-};
-
 static void config_usage(const char *prog) {
     fprintf(stderr, "Usage:\n");
     fprintf(stderr, "  server: %s <rdma|tcp> <port> [--iters <n>] [--size <bytes>]\n", prog);
@@ -183,7 +171,8 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
     }
 
     uint64_t total_time = time_elapsed_ns(t0, time_now_ns());
-    print_latency("send/recv latency (RTT)", latencies.data(), cfg.iters);
+    std::sort(latencies.begin(), latencies.end());
+    print_latency(cfg.is_rdma ? "send/recv latency RTT (rdma)" : "send/recv latency RTT (tcp)", latencies.data(), cfg.iters);
     print_bandwidth("rdma send/recv throughput", (uint64_t)cfg.size*cfg.iters, total_time);
     return 0;
 }
@@ -279,7 +268,8 @@ int run_client_write(Transport *t, Config &cfg) {
     }
 
     uint64_t total_time = time_elapsed_ns(t0, time_now_ns());
-    print_latency("rdma write latency (one-sided)", latencies.data(), cfg.iters);
+    std::sort(latencies.begin(), latencies.end());
+    print_latency(cfg.is_rdma ? "write latency (rdma)" : "write latency (tcp)", latencies.data(), cfg.iters);
     print_bandwidth("rdma write throughput", (uint64_t)cfg.size*cfg.iters, total_time);
     return 0;
 }
