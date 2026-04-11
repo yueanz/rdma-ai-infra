@@ -8,7 +8,7 @@ Built with `libibverbs` (no wrappers, no frameworks), progressing from raw verbs
 
 - [x] **Phase 1** — RDMA Verbs Foundation (RC QP, MR, CQ, send/recv, RDMA write, benchmarks)
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends, send/recv + write benchmarks)
-- [ ] **Phase 3** — Ring All-Reduce (chunked pipeline, RDMA write + doorbell sync, TCP vs RDMA)
+- [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, TCP backend)
 - [ ] **Phase 4b** — Remote KV Cache (RDMA-based, prefill/decode access pattern)
 
 ## Benchmark Results
@@ -25,16 +25,24 @@ Built with `libibverbs` (no wrappers, no frameworks), progressing from raw verbs
 
 **Key insight:** RDMA write is 300x lower latency than send/recv on SoftRoCE because it bypasses the kernel receive path. On real hardware the gap is even larger (~10x).
 
-### Phase 2 & 3 — Planned: Real RoCE Hardware (OCI BM.Optimized3.36)
+### Phase 3 — Ring All-Reduce (Azure VM, TCP backend, loopback)
 
-Benchmarks for Phase 2 (RDMA vs TCP backend) and Phase 3 (ring all-reduce scaling) will be measured on two OCI BM.Optimized3.36 bare-metal instances connected via OCI RDMA cluster network (RoCE v2, Mellanox ConnectX-6). Expected results:
+| Benchmark | Min | Median | p99 |
+|---|---|---|---|
+| `ring_allreduce` TCP, N=2, 1024 floats (4KB) | 45 μs | 95 μs | 121 μs |
+
+> TCP loopback baseline. RDMA backend benchmark pending real RoCE hardware.
+
+### Phase 2 — Planned: Real RoCE Hardware (OCI BM.Optimized3.36)
+
+Benchmarks for Phase 2 (RDMA vs TCP backend) will be measured on two OCI BM.Optimized3.36 bare-metal instances connected via OCI RDMA cluster network (RoCE v2, Mellanox ConnectX-6). Expected results:
 
 | Benchmark | Expected |
 |---|---|
 | `lat_rdma_write` | ~1–3 μs |
 | `lat_send_recv` RDMA | ~2–5 μs |
 | `bw_rdma_write` | ~10–25 Gbps |
-| ring all-reduce (N=4, 1GB) | TBD |
+| ring all-reduce RDMA, N=4, 1GB | TBD |
 
 > SoftRoCE (software RDMA over UDP) does not activate kernel-bypass, so RDMA vs TCP comparisons are only meaningful on real hardware.
 
@@ -43,12 +51,11 @@ Benchmarks for Phase 2 (RDMA vs TCP backend) and Phase 3 (ring all-reduce scalin
 ```
 rdma-ai-infra/
 │
-├── common/                          # Pure C — linked by all phases
-│   ├── include/
-│   │   ├── timing.h                 # CLOCK_MONOTONIC nanosecond timer
-│   │   ├── logging.h                # LOG_INFO / LOG_ERR / LOG_DEBUG macros
-│   │   └── cli.h
-│   └── src/
+├── common/                          # linked by all phases
+│   └── include/
+│       ├── timing.h                 # CLOCK_MONOTONIC nanosecond timer
+│       ├── logging.h                # LOG_INFO / LOG_ERR macros
+│       └── bench_utils.h            # print_latency / print_bandwidth
 │
 ├── phase1_verbs/                    # Pure C ────────────────────────────
 │   ├── include/
@@ -67,46 +74,28 @@ rdma-ai-infra/
 │
 ├── phase2_transport/                # C++17
 │   ├── include/
-│   │   ├── transport.hpp            # Transport pure virtual base class
-│   │   ├── rdma_backend.hpp         # RDMA implementation (calls phase1 via extern "C")
-│   │   └── tcp_backend.hpp          # TCP implementation
+│   │   ├── transport.hpp            # Transport pure virtual base class + ScopedBuffer
+│   │   ├── rdma_backend.hpp
+│   │   └── tcp_backend.hpp
 │   ├── src/
-│   │   ├── rdma_backend.cpp
+│   │   ├── rdma_backend.cpp         # wraps phase1 via extern "C"
 │   │   └── tcp_backend.cpp
 │   └── bench/
-│       └── backend_compare.cpp      # same workload over both backends
+│       └── backend_compare.cpp      # send/recv + write latency over both backends
 │
-├── phase3_collective/               # C++
+├── phase3_collective/               # C++17
 │   ├── include/
-│   │   └── collective.hpp
+│   │   └── collective.hpp           # World struct, world_init, ring_allreduce
 │   ├── src/
-│   │   ├── world.cpp                # process group init, rendezvous
-│   │   ├── ring_topo.cpp            # ring neighbor computation
-│   │   ├── ring_allreduce.cpp       # chunked ring all-reduce (float32 sum)
-│   │   └── double_buffer.cpp        # compute / communicate overlap
+│   │   ├── world.cpp                # process group init, parallel listen/connect
+│   │   └── ring_allreduce.cpp       # chunked ring all-reduce (float32 sum)
 │   └── bench/
-│       ├── allreduce_bench.cpp      # latency + BW across world sizes
-│       └── tcp_vs_rdma.cpp          # backend comparison
+│       └── allreduce_bench.cpp      # correctness check + latency benchmark
 │
-├── phase4b_kv_cache/                # C++
-│   ├── include/
-│   │   └── kv_cache.hpp
-│   ├── src/
-│   │   ├── remote_allocator.cpp     # slab allocator over registered MRs
-│   │   ├── kv_server.cpp
-│   │   └── kv_client.cpp
-│   └── bench/
-│       ├── kv_bench.cpp             # small vs large object latency
-│       └── inference_pattern.cpp    # prefill write + decode read pattern
-│
-├── tests/                           # Correctness tests (separate from bench)
-│   ├── test_mr.c                    # MR register/deregister + content verify
-│   ├── test_qp_connect.c            # QP build + send/recv correctness
-│   └── test_transport.cpp           # RDMA vs TCP backend same output
+├── phase4b_kv_cache/                # C++ — planned
 │
 ├── scripts/
-│   ├── setup_softroce.sh            # modprobe rdma_rxe + bind to eth0
-│   └── run_bench.sh
+│   └── setup.sh                     # apt install + SoftRoCE setup + build
 │
 ├── CMakeLists.txt
 └── README.md
