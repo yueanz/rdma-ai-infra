@@ -1,15 +1,17 @@
 #!/bin/bash
-# Setup script for OCI BM.Optimized3.36 (Oracle Linux 9)
+# Setup script for Ubuntu (Azure VM)
 # Usage: bash setup.sh
 set -e
 
 echo "=== Installing dependencies ==="
-sudo dnf install -y \
-    git cmake gcc gcc-c++ make \
-    libibverbs libibverbs-devel \
-    rdma-core rdma-core-devel \
+sudo apt-get update -y
+sudo apt-get install -y \
+    git cmake gcc g++ make \
+    libibverbs-dev ibverbs-utils \
+    rdma-core \
     ibacm infiniband-diags \
-    iproute
+    iproute2 \
+    linux-modules-extra-$(uname -r)
 
 echo "=== Enabling SoftRoCE (if no hardware RDMA) ==="
 # Check if hardware RDMA device exists
