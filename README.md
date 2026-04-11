@@ -25,17 +25,9 @@ Built with `libibverbs` (no wrappers, no frameworks), progressing from raw verbs
 
 **Key insight:** RDMA write is 300x lower latency than send/recv on SoftRoCE because it bypasses the kernel receive path. On real hardware the gap is even larger (~10x).
 
-### Phase 3 — Ring All-Reduce (Azure VM, TCP backend, loopback)
+### Phase 2 & 3 — Planned: Real RoCE Hardware (OCI BM.Optimized3.36)
 
-| Benchmark | Min | Median | p99 |
-|---|---|---|---|
-| `ring_allreduce` TCP, N=2, 1024 floats (4KB) | 45 μs | 95 μs | 121 μs |
-
-> TCP loopback baseline. RDMA backend benchmark pending real RoCE hardware.
-
-### Phase 2 — Planned: Real RoCE Hardware (OCI BM.Optimized3.36)
-
-Benchmarks for Phase 2 (RDMA vs TCP backend) will be measured on two OCI BM.Optimized3.36 bare-metal instances connected via OCI RDMA cluster network (RoCE v2, Mellanox ConnectX-6). Expected results:
+Benchmarks for Phase 2 (RDMA vs TCP backend) and Phase 3 (ring all-reduce RDMA) will be measured on two OCI BM.Optimized3.36 bare-metal instances connected via OCI RDMA cluster network (RoCE v2, Mellanox ConnectX-6). Expected results:
 
 | Benchmark | Expected |
 |---|---|
@@ -45,6 +37,14 @@ Benchmarks for Phase 2 (RDMA vs TCP backend) will be measured on two OCI BM.Opti
 | ring all-reduce RDMA, N=4, 1GB | TBD |
 
 > SoftRoCE (software RDMA over UDP) does not activate kernel-bypass, so RDMA vs TCP comparisons are only meaningful on real hardware.
+
+### Phase 3 — Ring All-Reduce (Azure VM, TCP backend, loopback)
+
+| Benchmark | Min | Median | p99 |
+|---|---|---|---|
+| `ring_allreduce` TCP, N=2, 1024 floats (4KB) | 45 μs | 95 μs | 121 μs |
+
+> TCP loopback baseline. RDMA backend benchmark pending real RoCE hardware.
 
 ## Architecture
 
