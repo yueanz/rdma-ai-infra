@@ -73,7 +73,11 @@ int run_server_sendrecv(Transport *t, Config &cfg) {
     }
 
     // listen() initializes ctx_ (PD), so reg_buf must come after it
-    ScopedBuffer sb(t, buf.data(), len);
+    ScopedBuffer sb;
+    if (sb.init(t, buf.data(), len) != 0) {
+        LOG_ERR("run_server_sendrecv failed: sb init failed");
+        return -1;
+    }
 
     // pre-post recv before accept so QP is ready when client sends
     if (cfg.is_rdma && t->recv_async(&sb.h, len, 1, 0) != 0) {
@@ -138,7 +142,11 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
         return -1;
     }
 
-    ScopedBuffer sb(t, buf.data(), len);
+    ScopedBuffer sb;
+    if (sb.init(t, buf.data(), len) != 0) {
+        LOG_ERR("run_client_sendrecv failed: sb init failed");
+        return -1;
+    }
 
     int total_iters = kWarmup + cfg.iters;
     uint64_t t0;
@@ -195,7 +203,11 @@ int run_server_write(Transport *t, Config &cfg) {
     }
 
     // listen() initializes ctx_ (PD), so reg_buf must come after it
-    ScopedBuffer sb(t, buf.data(), len);
+    ScopedBuffer sb;
+    if (sb.init(t, buf.data(), len) != 0) {
+        LOG_ERR("run_server_write failed: sb init failed");
+        return -1;
+    }
 
     if (t->accept() != 0) {
         LOG_ERR("run_server_write failed: accept failed");
@@ -242,7 +254,11 @@ int run_client_write(Transport *t, Config &cfg) {
         return -1;
     }
 
-    ScopedBuffer sb(t, buf.data(), len);
+    ScopedBuffer sb;
+    if (sb.init(t, buf.data(), len) != 0) {
+        LOG_ERR("run_client_write failed: sb init failed");
+        return -1;
+    }
 
     if (t->exchange_buf(&sb.h, &remote_addr, &rkey) != 0) {
         LOG_ERR("run_client_write failed: accept failed");

@@ -17,9 +17,21 @@ int ring_allreduce(World *w, float *buf, size_t count) {
     std::vector<float> stage(chunk);
 
     // register buffers
-    ScopedBuffer r_buf_h(w->right.get(), buf, count * sizeof(float));
-    ScopedBuffer l_buf_h(w->left.get(), buf, count * sizeof(float));
-    ScopedBuffer stage_h(w->left.get(), stage.data(), chunk_bytes);
+    ScopedBuffer r_buf_h;
+    if (r_buf_h.init(w->right.get(), buf, count * sizeof(float)) != 0) {
+        LOG_ERR("ring_allreduce failed: sb init failed");
+        return -1;
+    }
+    ScopedBuffer l_buf_h;
+    if (l_buf_h.init(w->left.get(), buf, count * sizeof(float)) != 0) {
+        LOG_ERR("ring_allreduce failed: sb init failed");
+        return -1;
+    }
+    ScopedBuffer stage_h;
+    if (stage_h.init(w->left.get(), stage.data(), chunk_bytes) != 0) {
+        LOG_ERR("ring_allreduce failed: sb init failed");
+        return -1;
+    }
 
     // reduce-scatter: N-1 rounds
     for (int r = 0; r < N-1; r++) {
@@ -37,7 +49,6 @@ int ring_allreduce(World *w, float *buf, size_t count) {
                 return -1;
             }
         } else {
-
             if (w->left->recv_async(&stage_h.h, chunk_bytes, r, 0) != 0) {
                 LOG_ERR("ring_allreduce failed: recv_async failed");
                 return -1;

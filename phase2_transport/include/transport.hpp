@@ -61,13 +61,14 @@ public:
 };
 
 struct ScopedBuffer {
-    Transport *t;
-    BufferHandle h;
-    ScopedBuffer(Transport *t, void *buf, size_t size) : t(t), h{} {
-        if (t->reg_buf(buf, size, &h) != 0)
-            throw std::runtime_error("reg_buf failed");
+    Transport *t = nullptr;
+    BufferHandle h{};
+    ScopedBuffer() = default;
+    int init(Transport *t_, void *buf, size_t size) {
+        t = t_;
+        return t->reg_buf(buf, size, &h);
     }
-    ~ScopedBuffer() {t->dereg_buf(&h);}
+    ~ScopedBuffer() { if (t) t->dereg_buf(&h); }
     ScopedBuffer(const ScopedBuffer&) = delete;
     ScopedBuffer& operator=(const ScopedBuffer&) = delete;
 };
