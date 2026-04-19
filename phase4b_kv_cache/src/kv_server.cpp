@@ -19,7 +19,6 @@ static void config_usage(const char *prog) {
 
 static int config_parse(int argc, char *argv[], Config *cfg) {
     if (argc < 4) {
-        config_usage(argv[0]);
         return -1;
     }
     
