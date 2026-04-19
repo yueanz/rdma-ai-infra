@@ -9,12 +9,11 @@ struct Config
     int port = 12345;
     int num_slots;
     size_t slot_size;
-    bool is_rdma = false;
 };
 
 static void config_usage(const char *prog) {
     fprintf(stderr, "Usage:\n");
-    fprintf(stderr, "  %s <port> <num_slots> <slot_size> [--rdma]\n", prog);
+    fprintf(stderr, "  %s <port> <num_slots> <slot_size>\n", prog);
 }
 
 static int config_parse(int argc, char *argv[], Config *cfg) {
@@ -26,11 +25,6 @@ static int config_parse(int argc, char *argv[], Config *cfg) {
     cfg->port = atoi(argv[i++]);
     cfg->num_slots = atoi(argv[i++]);
     cfg->slot_size = atoi(argv[i++]);
-    for (; i < argc; i++) {
-        if (strcmp(argv[i], "--rdma") == 0)
-            cfg->is_rdma = true;
-    }
-   
     return 0;
 }
 
@@ -125,9 +119,7 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        std::unique_ptr<Transport> data(
-            cfg.is_rdma ? create_rdma_transport() : create_tcp_transport()
-        );
+        std::unique_ptr<Transport> data(create_rdma_transport());
 
         if (data->listen(cfg.port) != 0) {
             LOG_ERR("listen failed");
