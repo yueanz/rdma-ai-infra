@@ -90,12 +90,12 @@ int RdmaTransport::exchange_buf(const BufferHandle *local, uint64_t *remote_addr
     qp_.local.rkey = mr->mr->rkey;
 
     if (is_server_) {
-        if (rdma_exchange_info_server(&qp_, port_+1) != 0) {
+        if (rdma_exchange_info_server(&qp_, port_+2) != 0) {
             LOG_ERR("rdma exchange_buf failed: rdma_exchange_info_server failed");
             return -1;
         }
     } else {
-        if (host_.empty() || rdma_exchange_info_client(&qp_, host_.c_str(), port_+1) != 0) {
+        if (host_.empty() || rdma_exchange_info_client(&qp_, host_.c_str(), port_+2) != 0) {
             LOG_ERR("rdma exchange_buf failed: host_ is empty or rdma_exchange_info_client failed");
             return -1;
         }
