@@ -89,6 +89,9 @@ static int serve(KVPool &pool, Transport *ctrl, ScopedBuffer &ctrl_sb) {
                 LOG_ERR("send_async failed");
                 return -1;
             }
+        } else {
+            LOG_ERR("serve: unknown msg type %d", msg);
+            return -1;
         }
     }
 }
