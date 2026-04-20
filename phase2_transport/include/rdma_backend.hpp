@@ -30,8 +30,9 @@ public:
 private:
     rdma_ctx_t ctx_;
     rdma_qp_t qp_;
-    int port_;  /* saved in listen(), used in accept() for OOB TCP handshake */
-    bool is_server_;
+    int port_ = -1;
+    int listen_fd_ = -1;
+    bool is_server_ = false;
     std::string host_;
 };
 

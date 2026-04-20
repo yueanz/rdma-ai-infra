@@ -1,5 +1,6 @@
 #include "rdma_backend.hpp"
 #include <cstdlib>
+#include <unistd.h>
 
 RdmaTransport::RdmaTransport() {
     memset(&ctx_, 0, sizeof(ctx_));
@@ -90,13 +91,13 @@ int RdmaTransport::exchange_buf(const BufferHandle *local, uint64_t *remote_addr
     qp_.local.rkey = mr->mr->rkey;
 
     if (is_server_) {
-        if (rdma_exchange_info_server(&qp_, port_+2) != 0) {
-            LOG_ERR("rdma exchange_buf failed: rdma_exchange_info_server failed");
+        if (rdma_accept(listen_fd_, &qp_) != 0) {
+            LOG_ERR("rdma exchange_buf failed: rdma_accept failed");
             return -1;
         }
     } else {
-        if (host_.empty() || rdma_exchange_info_client(&qp_, host_.c_str(), port_+2) != 0) {
-            LOG_ERR("rdma exchange_buf failed: host_ is empty or rdma_exchange_info_client failed");
+        if (host_.empty() || rdma_exchange_info_client(&qp_, host_.c_str(), port_) != 0) {
+            LOG_ERR("rdma exchange_buf failed: rdma_exchange_info_client failed");
             return -1;
         }
     }
@@ -192,14 +193,18 @@ int RdmaTransport::listen(int port) {
         LOG_ERR("rdma listen failed: rdma_qp_init failed");
         return -1;
     }
-    port_ = port;
+
+    if (rdma_listen(port, &listen_fd_) != 0) {
+        LOG_ERR("rdma listen failed: rdma_listen failed");
+        return -1;
+    }
     is_server_ = true;
     return 0;
 }
 
 int RdmaTransport::accept() {
-    if (rdma_exchange_info_server(&qp_, port_) != 0) {
-        LOG_ERR("rdma accept failed: rdma_exchange_info_server failed");
+    if (rdma_accept(listen_fd_, &qp_) != 0) {
+        LOG_ERR("rdma accept failed: rdma_accept failed");
         return -1;
     }
     if (rdma_qp_connect(&ctx_, &qp_) != 0) {
@@ -212,6 +217,10 @@ int RdmaTransport::accept() {
 void RdmaTransport::close() {
     rdma_qp_destroy(&qp_);
     rdma_ctx_destroy(&ctx_);
+    if (listen_fd_ >= 0) {
+        ::close(listen_fd_);
+        listen_fd_ = -1;
+    }
 }
 
 Transport *create_rdma_transport() { return new RdmaTransport(); }

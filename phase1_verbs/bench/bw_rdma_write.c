@@ -65,7 +65,7 @@ static void config_usage(const char *prog) {
 
 
 int main(int argc, char *argv[]) {
-    int ret = 1, i;
+    int ret = 1, i, listen_fd = -1;
     uint64_t t0, total_time;
     config_t cfg = {0};
     rdma_ctx_t ctx = {0};
@@ -103,9 +103,15 @@ int main(int argc, char *argv[]) {
     qp.local.addr = (uint64_t)(uintptr_t)mr.mr->addr;
     qp.local.rkey = mr.mr->rkey;
 
-    if (cfg.server_ip == NULL && rdma_exchange_info_server(&qp, cfg.port) != 0) {
-        LOG_ERR("rdma exchange info server failed");
-        goto out;
+    if (cfg.server_ip == NULL) {
+        if (rdma_listen(cfg.port, &listen_fd) != 0) {
+            LOG_ERR("rdma listen failed");
+            goto out;
+        }
+        if (rdma_accept(listen_fd, &qp) != 0) {
+            LOG_ERR("rdma accept failed");
+            goto out;
+        }
     }
 
     if (cfg.server_ip != NULL && rdma_exchange_info_client(&qp, cfg.server_ip, cfg.port) != 0) {
@@ -147,6 +153,7 @@ int main(int argc, char *argv[]) {
 
     ret = 0;
 out:
+    if (listen_fd >= 0) close(listen_fd);
     rdma_qp_destroy(&qp);
     rdma_mr_dereg(&mr);
     rdma_ctx_destroy(&ctx);
