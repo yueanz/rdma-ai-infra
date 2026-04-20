@@ -9,7 +9,7 @@ Built with `libibverbs` (no wrappers, no frameworks), progressing from raw verbs
 - [x] **Phase 1** — RDMA Verbs Foundation (RC QP, MR, CQ, send/recv, RDMA write, benchmarks)
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends, send/recv + write benchmarks)
 - [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, TCP backend)
-- [ ] **Phase 4b** — Remote KV Cache (RDMA-based, prefill/decode access pattern)
+- [x] **Phase 4b** — Remote KV Cache (slab allocator over single MR, ctrl/data plane separation, prefill via RDMA write, decode via RDMA read)
 
 ## Benchmark Results
 
@@ -45,6 +45,17 @@ Benchmarks for Phase 2 (RDMA vs TCP backend) and Phase 3 (ring all-reduce RDMA) 
 | `ring_allreduce` TCP, N=2, 1024 floats (4KB) | 45 μs | 95 μs | 121 μs |
 
 > TCP loopback baseline. RDMA backend benchmark pending real RoCE hardware.
+
+### Phase 4b — Remote KV Cache (Azure VM, MANA RDMA, loopback, slot_size=4096B)
+
+| Benchmark | Min | Median | p99 | Max |
+|---|---|---|---|---|
+| `kv_bench` prefill (RDMA write) | 8.41 μs | 8.50 μs | 10.28 μs | 59.89 μs |
+| `kv_bench` decode (RDMA read) | TBD | TBD | TBD | TBD |
+
+Throughput (prefill, 1000 iters × 4096B): **0.44 GB/s / 3.79 Gbps**
+
+> Measured on Azure MANA RoCE hardware over loopback. Decode path (RDMA read) benchmark in progress.
 
 ## Architecture
 
@@ -92,7 +103,13 @@ rdma-ai-infra/
 │   └── bench/
 │       └── allreduce_bench.cpp      # correctness check + latency benchmark
 │
-├── phase4b_kv_cache/                # C++ — planned
+├── phase4b_kv_cache/                # C++17
+│   ├── include/
+│   │   └── kv_cache.hpp             # KVPool (slab allocator), KVRemote, KVMeta, CtrlBuf
+│   ├── src/
+│   │   └── kv_server.cpp            # ctrl (TCP) + data (RDMA) server, ALLOC/FREE protocol
+│   └── bench/
+│       └── kv_bench.cpp             # prefill (RDMA write) + decode (RDMA read) benchmark
 │
 ├── scripts/
 │   └── setup.sh                     # apt install + SoftRoCE setup + build
@@ -118,6 +135,17 @@ cmake .. && make
 ```
 
 ## Running Benchmarks
+
+```bash
+# Phase 4b — Remote KV Cache
+cd build/phase4b_kv_cache
+
+# Terminal 1 — server (port, num_slots, slot_size)
+./kv_server 12345 16 4096
+
+# Terminal 2 — client
+./kv_bench <server_ip> 12345 [--iters <n>]
+```
 
 ```bash
 # Phase 1
