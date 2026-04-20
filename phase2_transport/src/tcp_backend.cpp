@@ -136,6 +136,12 @@ int TcpTransport::write_async(const BufferHandle *local, uint64_t remote_addr,
     return send_async(local, len, id, offset);
 }
 
+int TcpTransport::read_async(const BufferHandle *local, uint64_t remote_addr,
+                            uint32_t rkey, size_t len, uint64_t id, size_t offset) {
+    LOG_ERR("read_async failed: tcp not supported");
+    return -1;
+}
+
 int TcpTransport::poll(uint64_t *completed_id) {
     return 0;
 }
@@ -168,6 +174,7 @@ int TcpTransport::connect(const char *host, int port) {
     is_server_ = false;
     return 0;
 }
+
 int TcpTransport::listen(int port) {
     int opt = 1;
     struct sockaddr_in addr = {0};
@@ -196,6 +203,7 @@ int TcpTransport::listen(int port) {
     is_server_ = true;
     return 0;
 }
+
 int TcpTransport::accept() {
     fd_ = ::accept(listen_fd_, NULL, NULL);
     if (fd_ < 0) {
@@ -204,6 +212,7 @@ int TcpTransport::accept() {
     }
     return 0;
 }
+
 void TcpTransport::close() {
     if (fd_ >= 0)
         ::close(fd_);

@@ -100,6 +100,34 @@ static int kv_free(int slot_idx, Transport *ctrl, ScopedBuffer &ctrl_sb) {
     return 0;
 }
 
+template<typename Op>
+static int run_bench(const char *label, Transport *data, Op op,
+                     size_t slot_size, int iters) {
+    std::vector<uint64_t> latencies(iters);
+    int total_iters = kWarmup + iters;
+    uint64_t start, t0;
+
+    for (int i = 0; i < total_iters; i++) {
+        if (i == kWarmup) t0 = time_now_ns();
+        start = time_now_ns();
+        if (op(i) != 0) {
+            LOG_ERR("run_bench failed: op failed at iter %d", i);
+            return -1;
+        }
+        if (data->poll(nullptr) != 0) {
+            LOG_ERR("run_bench failed: poll failed at iter %d", i);
+            return -1;
+        }
+        if (i >= kWarmup)
+            latencies[i - kWarmup] = time_elapsed_ns(start, time_now_ns());
+    }
+
+    uint64_t total_time = time_elapsed_ns(t0, time_now_ns());
+    std::sort(latencies.begin(), latencies.end());
+    print_latency(label, latencies.data(), iters);
+    print_bandwidth(label, (uint64_t)iters * slot_size, total_time);
+    return 0;
+}
 int main(int argc, char *argv[]) {
     Config cfg;
 
@@ -160,33 +188,23 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        uint64_t start, t0;
-        std::vector<uint64_t> latencies(cfg.iters);
-        int total_iters = kWarmup + cfg.iters;
+        uint64_t remote_addr = remote.base_addr + slot_idx * remote.slot_size;
 
-        for (int i = 0; i < total_iters; i++) {
-            if (i == kWarmup)
-                t0 = time_now_ns();
-            start = time_now_ns();
-            // slot offset baked into remote_addr; local offset=0 (local_buf is one slot)
-            uint64_t remote_addr = remote.base_addr + slot_idx * remote.slot_size;
-            if (data->write_async(&sb.h, remote_addr, remote.rkey,
-                                remote.slot_size, i, 0) != 0) {
-                LOG_ERR("write_async failed");
-                return 1;
-            }
-            if (data->poll(nullptr) != 0) {
-                LOG_ERR("poll failed");
-                return 1;
-            }
-            if (i >= kWarmup)
-                latencies[i - kWarmup] = time_elapsed_ns(start, time_now_ns());
+        // Prefill: push computed K/V tensors into remote cache slot (RDMA write, server CPU uninvolved)
+        if (run_bench("rdma write", data.get(),
+                [&](int i){return data->write_async(&sb.h, remote_addr, remote.rkey, remote.slot_size, i, 0);},
+                remote.slot_size, cfg.iters) != 0) {
+            LOG_ERR("write bench failed");
+            return 1;
         }
 
-        uint64_t total_time = time_elapsed_ns(t0, time_now_ns());
-        std::sort(latencies.begin(), latencies.end());
-        print_latency("rdma write latency", latencies.data(), cfg.iters);
-        print_bandwidth("rdma write throughput", (uint64_t)cfg.iters*remote.slot_size, total_time);
+        // Decode: fetch cached K/V tensors from remote slot per decode step (RDMA read, server CPU uninvolved)
+        if (run_bench("rdma read", data.get(),
+                [&](int i){return data->read_async(&sb.h, remote_addr, remote.rkey, remote.slot_size, i, 0);},
+                remote.slot_size, cfg.iters) != 0) {
+            LOG_ERR("read bench failed");
+            return 1;
+        }
 
         if (kv_free(slot_idx, ctrl.get(), ctrl_sb) != 0) {
             LOG_ERR("kv_free failed");

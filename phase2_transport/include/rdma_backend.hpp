@@ -17,6 +17,8 @@ public:
     int recv_async(BufferHandle *h, size_t len, uint64_t id, size_t offset) override;
     int write_async(const BufferHandle *local, uint64_t remote_addr, uint32_t rkey,
                             size_t len, uint64_t id, size_t offset) override;
+    int read_async(const BufferHandle *local, uint64_t remote_addr, uint32_t rkey,
+                            size_t len, uint64_t id, size_t offset) override;
     int exchange_buf(const BufferHandle *local, uint64_t *remote_addr,
                             uint32_t *rkey) override;
 

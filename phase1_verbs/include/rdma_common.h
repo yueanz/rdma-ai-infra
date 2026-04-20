@@ -93,6 +93,8 @@ int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id, siz
 int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id, size_t offset);
 int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint32_t send_flags,
                     uint64_t remote_addr, uint32_t rkey, uint64_t id, size_t offset);
+int rdma_post_read(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size,
+                    uint64_t remote_addr, uint32_t rkey, uint64_t id, size_t offset);
 int rdma_poll_cq(rdma_ctx_t *ctx, uint64_t *wr_id);
 #ifdef __cplusplus
 }

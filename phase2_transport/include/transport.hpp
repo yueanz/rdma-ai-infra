@@ -44,6 +44,10 @@ public:
     virtual int write_async(const BufferHandle *local,
                             uint64_t remote_addr, uint32_t rkey,
                             size_t len, uint64_t id, size_t offset) = 0;
+    
+    virtual int read_async(const BufferHandle *local,
+                        uint64_t remote_addr, uint32_t rkey,
+                        size_t len, uint64_t id, size_t offset) = 0;
 
     // Exchange buffer info with the peer out-of-band (over the existing connection).
     // Must be called after reg_buf() and before write_async().

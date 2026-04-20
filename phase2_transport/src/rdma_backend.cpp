@@ -121,6 +121,20 @@ int RdmaTransport::write_async(const BufferHandle *local, uint64_t remote_addr,
     return 0;
 }
 
+int RdmaTransport::read_async(const BufferHandle *local, uint64_t remote_addr,
+                            uint32_t rkey, size_t len, uint64_t id, size_t offset) {
+    if (local == nullptr) {
+        LOG_ERR("rdma read_async failed: local is nullptr");
+        return -1;
+    }
+    if (rdma_post_read(&qp_, (rdma_mr_t*)local->priv, len,
+                            remote_addr + offset, rkey, id, offset) != 0) {
+        LOG_ERR("rdma read_async failed: rdma_post_read failed");
+        return -1;
+    }
+    return 0;
+}
+
 int RdmaTransport::poll(uint64_t *completed_id) {
     return rdma_poll_cq(&ctx_, completed_id);
 }
