@@ -114,15 +114,15 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        if (ctrl->accept() != 0) {
-            LOG_ERR("accept failed");
-            return 1;
-        }
-
         std::unique_ptr<Transport> data(create_rdma_transport());
 
         if (data->listen(cfg.port) != 0) {
             LOG_ERR("listen failed");
+            return 1;
+        }
+
+        if (ctrl->accept() != 0) {
+            LOG_ERR("accept failed");
             return 1;
         }
 

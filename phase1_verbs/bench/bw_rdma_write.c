@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <unistd.h>
 #include "rdma_common.h"
 #include "timing.h"
 #include "bench_utils.h"
