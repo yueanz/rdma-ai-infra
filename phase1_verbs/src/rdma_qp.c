@@ -94,7 +94,7 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     attr.path_mtu = IBV_MTU_1024;
     attr.dest_qp_num = qp->remote.qpn;
     attr.rq_psn = qp->remote.psn;
-    attr.max_dest_rd_atomic = 0;
+    attr.max_dest_rd_atomic = 1;
     attr.min_rnr_timer = 12;
     attr.ah_attr.is_global = 1;
     attr.ah_attr.grh.dgid = qp->remote.gid;
@@ -104,6 +104,12 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     attr_mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
         IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
         IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
+
+    LOG_INFO("INIT->RTR: remote_qpn=%u remote_gid=%016llx:%016llx sgid_index=%d mtu=%d rd_atomic=%d",
+             attr.dest_qp_num,
+             (unsigned long long)be64toh(attr.ah_attr.grh.dgid.global.subnet_prefix),
+             (unsigned long long)be64toh(attr.ah_attr.grh.dgid.global.interface_id),
+             attr.ah_attr.grh.sgid_index, attr.path_mtu, attr.max_dest_rd_atomic);
 
     // init -> rtr
     if (ibv_modify_qp(qp->qp, &attr, attr_mask) != 0) {

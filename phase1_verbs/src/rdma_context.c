@@ -52,9 +52,15 @@ int rdma_ctx_init(rdma_ctx_t *ctx, int port, int gid_index) {
         struct ibv_context *tmp = ibv_open_device(dev_list[i]);
         if (!tmp) continue;
         if (ibv_query_device(tmp, &dev_attr) == 0 && dev_attr.node_guid != 0) {
+            LOG_INFO("selected device: %s node_guid=%016llx",
+                     ibv_get_device_name(dev_list[i]),
+                     (unsigned long long)dev_attr.node_guid);
             ctx->ctx = tmp;
             break;
         }
+        LOG_INFO("skipping device: %s node_guid=%016llx",
+                 ibv_get_device_name(dev_list[i]),
+                 (unsigned long long)dev_attr.node_guid);
         ibv_close_device(tmp);
     }
     ibv_free_device_list(dev_list);
@@ -78,7 +84,12 @@ int rdma_ctx_init(rdma_ctx_t *ctx, int port, int gid_index) {
 
     ctx->port = port;
     ctx->gid_index = find_roce_v2_gid(ctx->ctx, port, gid_index);
-    LOG_INFO("using device gid_index=%d", ctx->gid_index);
+
+    struct ibv_device_attr da;
+    if (ibv_query_device(ctx->ctx, &da) == 0)
+        LOG_INFO("device: %s gid_index=%d max_qp_rd_atom=%d max_res_rd_atom=%d",
+                 ibv_get_device_name(ctx->ctx->device),
+                 ctx->gid_index, da.max_qp_rd_atom, da.max_res_rd_atom);
     return 0;
 }
 
