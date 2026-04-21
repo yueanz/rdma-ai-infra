@@ -4,6 +4,27 @@
 
 #define CQ_DEPTH 128
 
+/* Scan GID table and return the first RoCE v2 GID index with a non-zero address.
+ * Falls back to the caller-supplied default if none is found. */
+static int find_roce_v2_gid(struct ibv_context *ctx, int port, int fallback) {
+    struct ibv_port_attr port_attr;
+    if (ibv_query_port(ctx, port, &port_attr) != 0)
+        return fallback;
+    for (int i = 0; i < port_attr.gid_tbl_len; i++) {
+        enum ibv_gid_type type;
+        union ibv_gid gid;
+        if (ibv_query_gid_type(ctx, port, i, &type) != 0)
+            continue;
+        if (type != IBV_GID_TYPE_ROCE_V2)
+            continue;
+        if (ibv_query_gid(ctx, port, i, &gid) != 0)
+            continue;
+        if (gid.global.subnet_prefix || gid.global.interface_id)
+            return i;
+    }
+    return fallback;
+}
+
 int rdma_ctx_init(rdma_ctx_t *ctx, int port, int gid_index) {
     if (ctx == NULL) {
         LOG_ERR("rdma context is null");
@@ -46,7 +67,8 @@ int rdma_ctx_init(rdma_ctx_t *ctx, int port, int gid_index) {
     }
 
     ctx->port = port;
-    ctx->gid_index = gid_index;
+    ctx->gid_index = find_roce_v2_gid(ctx->ctx, port, gid_index);
+    LOG_INFO("using device gid_index=%d", ctx->gid_index);
     return 0;
 }
 
