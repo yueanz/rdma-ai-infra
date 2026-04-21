@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <endian.h>
 
 int rdma_qp_create(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     struct ibv_qp_init_attr qp_init_attr  = {0};
@@ -34,10 +35,15 @@ int rdma_qp_create(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     qp->local.psn = rand() & 0xffffff;
     if (ibv_query_gid(ctx->ctx, ctx->port, ctx->gid_index, &qp->local.gid) != 0) {
         LOG_ERR("failed to query gid");
-        ibv_destroy_qp(qp->qp); 
+        ibv_destroy_qp(qp->qp);
         qp->qp = NULL;
         return -1;
     }
+    LOG_INFO("local gid[%d]: %016llx:%016llx qpn=%u",
+             ctx->gid_index,
+             (unsigned long long)be64toh(qp->local.gid.global.subnet_prefix),
+             (unsigned long long)be64toh(qp->local.gid.global.interface_id),
+             qp->local.qpn);
 
     return 0;
 }
