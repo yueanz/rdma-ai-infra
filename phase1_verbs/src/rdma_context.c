@@ -15,14 +15,19 @@ int rdma_ctx_init(rdma_ctx_t *ctx, int port, int gid_index) {
         LOG_ERR("no device exists");
         return -1;
     }
-    /* Honour RDMA_DEVICE env var; fall back to first openable device. */
+    /* Honour RDMA_DEVICE env var; otherwise prefer device with valid node_guid. */
     const char *want = getenv("RDMA_DEVICE");
     ctx->ctx = NULL;
     for (int i = 0; dev_list[i]; i++) {
         if (want && strcmp(ibv_get_device_name(dev_list[i]), want) != 0)
             continue;
+        struct ibv_device_attr dev_attr;
         struct ibv_context *tmp = ibv_open_device(dev_list[i]);
         if (!tmp) continue;
+        if (!want && ibv_query_device(tmp, &dev_attr) == 0 && dev_attr.node_guid == 0) {
+            ibv_close_device(tmp);
+            continue;
+        }
         ctx->ctx = tmp;
         break;
     }
