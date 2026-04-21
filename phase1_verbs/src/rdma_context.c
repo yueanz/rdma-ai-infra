@@ -14,14 +14,13 @@ int rdma_ctx_init(rdma_ctx_t *ctx, int port, int gid_index) {
         LOG_ERR("no device exists");
         return -1;
     }
-    /* skip devices with zeroed GUID (e.g. manae_0 on Azure MANA) */
+    /* skip devices with zeroed node_guid (e.g. rdmaP* virtual device on Azure MANA) */
     ctx->ctx = NULL;
     for (int i = 0; dev_list[i]; i++) {
-        union ibv_gid guid;
+        struct ibv_device_attr dev_attr;
         struct ibv_context *tmp = ibv_open_device(dev_list[i]);
         if (!tmp) continue;
-        if (ibv_query_gid(tmp, 1, 0, &guid) == 0 &&
-            (guid.global.subnet_prefix || guid.global.interface_id)) {
+        if (ibv_query_device(tmp, &dev_attr) == 0 && dev_attr.node_guid != 0) {
             ctx->ctx = tmp;
             break;
         }
