@@ -94,7 +94,7 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     attr.path_mtu = IBV_MTU_1024;
     attr.dest_qp_num = qp->remote.qpn;
     attr.rq_psn = qp->remote.psn;
-    attr.max_dest_rd_atomic = 1;
+    attr.max_dest_rd_atomic = 0;
     attr.min_rnr_timer = 12;
     attr.ah_attr.is_global = 1;
     attr.ah_attr.grh.dgid = qp->remote.gid;
