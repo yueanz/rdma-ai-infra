@@ -2,8 +2,6 @@
 #include "logging.h"
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <endian.h>
 
 int rdma_qp_create(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     struct ibv_qp_init_attr qp_init_attr  = {0};
@@ -39,11 +37,6 @@ int rdma_qp_create(rdma_ctx_t *ctx, rdma_qp_t *qp) {
         qp->qp = NULL;
         return -1;
     }
-    LOG_INFO("local gid[%d]: %016llx:%016llx qpn=%u",
-             ctx->gid_index,
-             (unsigned long long)be64toh(qp->local.gid.global.subnet_prefix),
-             (unsigned long long)be64toh(qp->local.gid.global.interface_id),
-             qp->local.qpn);
 
     return 0;
 }
@@ -96,25 +89,16 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     attr.rq_psn = qp->remote.psn;
     attr.max_dest_rd_atomic = 1;
     attr.min_rnr_timer = 12;
-    attr.ah_attr.is_global = 1;
-    attr.ah_attr.grh.dgid = qp->remote.gid;
-    attr.ah_attr.grh.sgid_index = ctx->gid_index;
-    attr.ah_attr.grh.hop_limit = 0xff;
+    /* Azure MANA rdmaP device routes by QPN internally — no GRH needed */
+    attr.ah_attr.is_global = 0;
     attr.ah_attr.port_num = ctx->port;
     attr_mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
         IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
         IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
 
-    LOG_INFO("INIT->RTR: remote_qpn=%u remote_gid=%016llx:%016llx sgid_index=%d mtu=%d rd_atomic=%d",
-             attr.dest_qp_num,
-             (unsigned long long)be64toh(attr.ah_attr.grh.dgid.global.subnet_prefix),
-             (unsigned long long)be64toh(attr.ah_attr.grh.dgid.global.interface_id),
-             attr.ah_attr.grh.sgid_index, attr.path_mtu, attr.max_dest_rd_atomic);
-
     // init -> rtr
     if (ibv_modify_qp(qp->qp, &attr, attr_mask) != 0) {
-        LOG_ERR("failed to modify queue pair (INIT->RTR): %s, remote qpn=%u sgid_index=%d",
-                strerror(errno), attr.dest_qp_num, attr.ah_attr.grh.sgid_index);
+        LOG_ERR("failed to modify queue pair");
         return -1;
     }
 
@@ -126,7 +110,7 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     attr.sq_psn        = qp->local.psn;
     attr.max_rd_atomic = 1;
     attr_mask = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
-        IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC;    
+        IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC;
 
     // rtr -> rts
     if (ibv_modify_qp(qp->qp, &attr, attr_mask) != 0) {

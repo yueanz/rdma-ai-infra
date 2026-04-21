@@ -1,39 +1,9 @@
 #include "rdma_common.h"
 #include "logging.h"
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 
 #define CQ_DEPTH 128
-
-/* Scan GID table via sysfs and return the first RoCE v2 GID index with a non-zero address.
- * Falls back to the caller-supplied default if none is found. */
-static int find_roce_v2_gid(struct ibv_context *ctx, int port, int fallback) {
-    struct ibv_port_attr port_attr;
-    if (ibv_query_port(ctx, port, &port_attr) != 0)
-        return fallback;
-
-    const char *dev_name = ibv_get_device_name(ctx->device);
-    for (int i = 0; i < port_attr.gid_tbl_len; i++) {
-        char path[256], type_str[32];
-        snprintf(path, sizeof(path),
-                 "/sys/class/infiniband/%s/ports/%d/gid_attrs/types/%d",
-                 dev_name, port, i);
-        FILE *f = fopen(path, "r");
-        if (!f) continue;
-        int ok = fgets(type_str, sizeof(type_str), f) != NULL;
-        fclose(f);
-        if (!ok || strstr(type_str, "RoCE v2") == NULL)
-            continue;
-
-        union ibv_gid gid;
-        if (ibv_query_gid(ctx, port, i, &gid) != 0)
-            continue;
-        if (gid.global.subnet_prefix || gid.global.interface_id)
-            return i;
-    }
-    return fallback;
-}
 
 int rdma_ctx_init(rdma_ctx_t *ctx, int port, int gid_index) {
     if (ctx == NULL) {
@@ -45,23 +15,16 @@ int rdma_ctx_init(rdma_ctx_t *ctx, int port, int gid_index) {
         LOG_ERR("no device exists");
         return -1;
     }
-    /* skip devices with zeroed node_guid (e.g. rdmaP* virtual device on Azure MANA) */
+    /* Honour RDMA_DEVICE env var; fall back to first openable device. */
+    const char *want = getenv("RDMA_DEVICE");
     ctx->ctx = NULL;
     for (int i = 0; dev_list[i]; i++) {
-        struct ibv_device_attr dev_attr;
+        if (want && strcmp(ibv_get_device_name(dev_list[i]), want) != 0)
+            continue;
         struct ibv_context *tmp = ibv_open_device(dev_list[i]);
         if (!tmp) continue;
-        if (ibv_query_device(tmp, &dev_attr) == 0 && dev_attr.node_guid != 0) {
-            LOG_INFO("selected device: %s node_guid=%016llx",
-                     ibv_get_device_name(dev_list[i]),
-                     (unsigned long long)dev_attr.node_guid);
-            ctx->ctx = tmp;
-            break;
-        }
-        LOG_INFO("skipping device: %s node_guid=%016llx",
-                 ibv_get_device_name(dev_list[i]),
-                 (unsigned long long)dev_attr.node_guid);
-        ibv_close_device(tmp);
+        ctx->ctx = tmp;
+        break;
     }
     ibv_free_device_list(dev_list);
 
@@ -83,13 +46,7 @@ int rdma_ctx_init(rdma_ctx_t *ctx, int port, int gid_index) {
     }
 
     ctx->port = port;
-    ctx->gid_index = find_roce_v2_gid(ctx->ctx, port, gid_index);
-
-    struct ibv_device_attr da;
-    if (ibv_query_device(ctx->ctx, &da) == 0)
-        LOG_INFO("device: %s gid_index=%d max_qp_rd_atom=%d max_res_rd_atom=%d",
-                 ibv_get_device_name(ctx->ctx->device),
-                 ctx->gid_index, da.max_qp_rd_atom, da.max_res_rd_atom);
+    ctx->gid_index = gid_index;
     return 0;
 }
 

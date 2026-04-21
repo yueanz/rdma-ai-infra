@@ -26,6 +26,25 @@ else
     sudo rdma link add rxe0 type rxe netdev "$NETDEV"
 fi
 
+echo "=== Selecting RDMA device ==="
+# On Azure MANA, prefer the transport device (no netdev) over the RoCE device.
+# On SoftRoCE / single-device setups, just pick the only device.
+RDMA_DEV=$(rdma dev show 2>/dev/null | awk '{print $2}' | while read dev; do
+    sysfs="/sys/class/infiniband/$dev/ports/1/net"
+    if [ ! -d "$sysfs" ]; then
+        echo "$dev"
+        break
+    fi
+done)
+if [ -z "$RDMA_DEV" ]; then
+    RDMA_DEV=$(rdma dev show 2>/dev/null | awk 'NR==1{print $2}')
+fi
+echo "Using RDMA device: $RDMA_DEV"
+grep -q "^export RDMA_DEVICE=" ~/.bashrc && \
+    sed -i "s|^export RDMA_DEVICE=.*|export RDMA_DEVICE=$RDMA_DEV|" ~/.bashrc || \
+    echo "export RDMA_DEVICE=$RDMA_DEV" >> ~/.bashrc
+export RDMA_DEVICE=$RDMA_DEV
+
 echo "=== Verifying RDMA device ==="
 ibv_devinfo
 
