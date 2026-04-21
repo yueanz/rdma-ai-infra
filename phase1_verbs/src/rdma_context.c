@@ -1,22 +1,32 @@
 #include "rdma_common.h"
 #include "logging.h"
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 
 #define CQ_DEPTH 128
 
-/* Scan GID table and return the first RoCE v2 GID index with a non-zero address.
+/* Scan GID table via sysfs and return the first RoCE v2 GID index with a non-zero address.
  * Falls back to the caller-supplied default if none is found. */
 static int find_roce_v2_gid(struct ibv_context *ctx, int port, int fallback) {
     struct ibv_port_attr port_attr;
     if (ibv_query_port(ctx, port, &port_attr) != 0)
         return fallback;
+
+    const char *dev_name = ibv_get_device_name(ctx->device);
     for (int i = 0; i < port_attr.gid_tbl_len; i++) {
-        enum ibv_gid_type type;
+        char path[256], type_str[32];
+        snprintf(path, sizeof(path),
+                 "/sys/class/infiniband/%s/ports/%d/gid_attrs/types/%d",
+                 dev_name, port, i);
+        FILE *f = fopen(path, "r");
+        if (!f) continue;
+        int ok = fgets(type_str, sizeof(type_str), f) != NULL;
+        fclose(f);
+        if (!ok || strstr(type_str, "RoCE v2") == NULL)
+            continue;
+
         union ibv_gid gid;
-        if (ibv_query_gid_type(ctx, port, i, &type) != 0)
-            continue;
-        if (type != IBV_GID_TYPE_ROCE_V2)
-            continue;
         if (ibv_query_gid(ctx, port, i, &gid) != 0)
             continue;
         if (gid.global.subnet_prefix || gid.global.interface_id)
