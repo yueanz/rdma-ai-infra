@@ -2,6 +2,7 @@
 #include "logging.h"
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 int rdma_qp_create(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     struct ibv_qp_init_attr qp_init_attr  = {0};
@@ -100,7 +101,8 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
 
     // init -> rtr
     if (ibv_modify_qp(qp->qp, &attr, attr_mask) != 0) {
-        LOG_ERR("failed to modify queue pair");
+        LOG_ERR("failed to modify queue pair (INIT->RTR): %s, remote qpn=%u sgid_index=%d",
+                strerror(errno), attr.dest_qp_num, attr.ah_attr.grh.sgid_index);
         return -1;
     }
 
