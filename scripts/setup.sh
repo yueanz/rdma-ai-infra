@@ -29,7 +29,7 @@ fi
 echo "=== Selecting RDMA device ==="
 # On Azure MANA, prefer the transport device (no netdev) over the RoCE device.
 # On SoftRoCE / single-device setups, just pick the only device.
-RDMA_DEV=$(rdma dev show 2>/dev/null | awk '{print $2}' | while read dev; do
+RDMA_DEV=$(rdma dev show 2>/dev/null | awk '{print $2}' | tr -d ':' | while read dev; do
     sysfs="/sys/class/infiniband/$dev/ports/1/net"
     if [ ! -d "$sysfs" ]; then
         echo "$dev"

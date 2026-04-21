@@ -10,6 +10,7 @@ Built with `libibverbs` (no wrappers, no frameworks), progressing from raw verbs
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends, send/recv + write benchmarks)
 - [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, TCP backend)
 - [x] **Phase 4b** — Remote KV Cache (slab allocator over single MR, ctrl/data plane separation, prefill via RDMA write, decode via RDMA read)
+- [ ] **Phase 5** — vLLM KVTransferAgent Integration (pybind11 binding for Transport layer, RdmaKVTransferAgent backed by RDMA, CPU tensor path first, GPUDirect path designed for future hardware)
 
 ## Benchmark Results
 
@@ -46,16 +47,16 @@ Benchmarks for Phase 2 (RDMA vs TCP backend) and Phase 3 (ring all-reduce RDMA) 
 
 > TCP loopback baseline. RDMA backend benchmark pending real RoCE hardware.
 
-### Phase 4b — Remote KV Cache (Azure VM, MANA RDMA, loopback, slot_size=4096B)
+### Phase 4b — Remote KV Cache (slot_size=4096B)
 
-| Benchmark | Min | Median | p99 | Max |
-|---|---|---|---|---|
-| `kv_bench` prefill (RDMA write) | 8.41 μs | 8.50 μs | 10.28 μs | 59.89 μs |
-| `kv_bench` decode (RDMA read) | TBD | TBD | TBD | TBD |
+| Benchmark | Environment | Min | Median | p99 | Max |
+|---|---|---|---|---|---|
+| `kv_bench` prefill (RDMA write) | Azure MANA RoCE, loopback | 8.41 μs | 8.50 μs | 10.28 μs | 59.89 μs |
+| `kv_bench` decode (RDMA read) | SoftRoCE, loopback | 8.80 μs | 8.90 μs | 9.20 μs | 25.40 μs |
 
-Throughput (prefill, 1000 iters × 4096B): **0.44 GB/s / 3.79 Gbps**
+Throughput (1000 iters × 4096B): prefill **0.44 GB/s / 3.79 Gbps** · decode **0.42 GB/s / 3.63 Gbps**
 
-> Measured on Azure MANA RoCE hardware over loopback. Decode path (RDMA read) benchmark in progress.
+> Prefill measured on Azure MANA RoCE hardware. Decode measured on SoftRoCE (rdma_rxe) over loopback — latency not representative of real hardware.
 
 ## Architecture
 
