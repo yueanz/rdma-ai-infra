@@ -89,8 +89,10 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     attr.rq_psn = qp->remote.psn;
     attr.max_dest_rd_atomic = 1;
     attr.min_rnr_timer = 12;
-    /* Azure MANA rdmaP device routes by QPN internally — no GRH needed */
-    attr.ah_attr.is_global = 0;
+    attr.ah_attr.is_global = 1;
+    attr.ah_attr.grh.dgid = qp->remote.gid;
+    attr.ah_attr.grh.sgid_index = ctx->gid_index;
+    attr.ah_attr.grh.hop_limit = 0xff;
     attr.ah_attr.port_num = ctx->port;
     attr_mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
         IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
