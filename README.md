@@ -10,7 +10,7 @@ Built with `libibverbs` (no wrappers, no frameworks), progressing from raw verbs
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends, send/recv + write benchmarks)
 - [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, TCP backend)
 - [x] **Phase 4b** — Remote KV Cache (slab allocator over single MR, ctrl/data plane separation, prefill via RDMA write, decode via RDMA read)
-- [ ] **Phase 5** — vLLM KVTransferAgent Integration (pybind11 binding for Transport layer, RdmaKVTransferAgent backed by RDMA, CPU tensor path first, GPUDirect path designed for future hardware)
+- [ ] **Phase 5** — vLLM KVTransferAgent Integration (pybind11 binding for Transport layer, `RdmaKVConnector` implementing `KVConnectorBase_V1`, CPU tensor path validated end-to-end, GPUDirect designed for future hardware)
 
 ## Benchmark Results
 

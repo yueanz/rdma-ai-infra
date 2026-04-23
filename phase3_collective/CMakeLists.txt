@@ -6,7 +6,7 @@ add_library(collective STATIC
     src/ring_allreduce.cpp
 )
 target_include_directories(collective PUBLIC include ${COMMON_INC} ${TRANSPORT_INC})
-target_link_libraries(collective transport)
+target_link_libraries(collective transport pthread)
 
 foreach(bench allreduce_bench)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bench/${bench}.cpp)
