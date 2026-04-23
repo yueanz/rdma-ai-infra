@@ -2,6 +2,7 @@
 #include "logging.h"
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 int rdma_qp_create(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     struct ibv_qp_init_attr qp_init_attr  = {0};
@@ -100,7 +101,7 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
 
     // init -> rtr
     if (ibv_modify_qp(qp->qp, &attr, attr_mask) != 0) {
-        LOG_ERR("failed to modify queue pair");
+        LOG_ERR("INIT->RTR failed: errno=%d (%s)", errno, strerror(errno));
         return -1;
     }
 
@@ -116,7 +117,7 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
 
     // rtr -> rts
     if (ibv_modify_qp(qp->qp, &attr, attr_mask) != 0) {
-        LOG_ERR("modify queue pair failed");
+        LOG_ERR("RTR->RTS failed: errno=%d (%s)", errno, strerror(errno));
         return -1;
     }
 
