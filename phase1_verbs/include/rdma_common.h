@@ -73,8 +73,10 @@ typedef struct rdma_qp
 {
     struct ibv_qp    *qp;     /* The Queue Pair handle; has a Send Queue (SQ)
                                  and Receive Queue (RQ) inside */
-    rdma_conn_info_t  local;  /* Our own connection info (filled at QP creation) */
-    rdma_conn_info_t  remote; /* Peer's connection info (filled after OOB exchange) */
+    void             *cm_id;  /* struct rdma_cm_id* — rdma_cm connection handle */
+    void             *ec;     /* struct rdma_event_channel* */
+    rdma_conn_info_t  local;  /* Our own connection info */
+    rdma_conn_info_t  remote; /* Peer's connection info */
 } rdma_qp_t;
 
 int rdma_ctx_init(rdma_ctx_t *ctx, int port, int gid_index);
@@ -85,10 +87,16 @@ void rdma_mr_dereg(rdma_mr_t *mr);
 int rdma_qp_create(rdma_ctx_t *ctx, rdma_qp_t *qp);
 int rdma_qp_init(rdma_ctx_t *ctx, rdma_qp_t *qp);
 void rdma_qp_destroy(rdma_qp_t *qp);
-int rdma_listen(int port, int *listen_fd);
-int rdma_accept(int listen_fd, rdma_qp_t *qp);
-int rdma_exchange_info_client(rdma_qp_t *qp, const char *server_ip, int port);
+/* OOB TCP helpers — used by Phase 2 transport layer */
+int oob_listen(int port, int *listen_fd);
+int oob_accept(int listen_fd, rdma_qp_t *qp);
+int oob_exchange_client(rdma_qp_t *qp, const char *server_ip, int port);
 int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp);
+/* rdma_cm all-in-one connect: establishes connection, allocates ctx pd/cq,
+   registers MR, and exchanges addr/rkey via private_data */
+int rdma_cm_server(rdma_ctx_t *ctx, rdma_qp_t *qp, rdma_mr_t *mr, size_t mr_size, int port);
+int rdma_cm_client(rdma_ctx_t *ctx, rdma_qp_t *qp, rdma_mr_t *mr, size_t mr_size,
+                   const char *server_ip, int port);
 int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id, size_t offset);
 int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id, size_t offset);
 int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint32_t send_flags,

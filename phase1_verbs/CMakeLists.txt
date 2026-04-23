@@ -13,10 +13,11 @@ add_library(rdma_verbs STATIC
     src/rdma_mr.c
     src/rdma_qp.c
     src/rdma_connect.c
+    src/rdma_cm_connect.c
     src/rdma_ops.c
 )
 target_include_directories(rdma_verbs PUBLIC include ${COMMON_INC})
-target_link_libraries(rdma_verbs ${IBVERBS_LIB})
+target_link_libraries(rdma_verbs ${IBVERBS_LIB} rdmacm)
 
 # benchmarks
 foreach(bench lat_send_recv lat_rdma_write bw_rdma_write)

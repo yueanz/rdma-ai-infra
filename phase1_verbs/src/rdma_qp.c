@@ -1,3 +1,4 @@
+#include <rdma/rdma_cma.h>
 #include "rdma_common.h"
 #include "logging.h"
 #include <stdlib.h>
@@ -129,11 +130,18 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
 
 void rdma_qp_destroy(rdma_qp_t *qp) {
     if (qp == NULL) {
-        LOG_ERR(" rdma queue pair is null");
+        LOG_ERR("rdma queue pair is null");
         return;
     }
-    if (qp->qp && ibv_destroy_qp(qp->qp) != 0) {
-        LOG_ERR("destroy queue pair failed");
+    if (qp->cm_id) {
+        struct rdma_cm_id *id = (struct rdma_cm_id *)qp->cm_id;
+        if (id->qp) rdma_destroy_qp(id);
+        rdma_destroy_id(id);
+    } else if (qp->qp) {
+        if (ibv_destroy_qp(qp->qp) != 0)
+            LOG_ERR("destroy queue pair failed");
     }
+    if (qp->ec)
+        rdma_destroy_event_channel((struct rdma_event_channel *)qp->ec);
     memset(qp, 0, sizeof(*qp));
 }

@@ -91,12 +91,12 @@ int RdmaTransport::exchange_buf(const BufferHandle *local, uint64_t *remote_addr
     qp_.local.rkey = mr->mr->rkey;
 
     if (is_server_) {
-        if (rdma_accept(listen_fd_, &qp_) != 0) {
+        if (oob_accept(listen_fd_, &qp_) != 0) {
             LOG_ERR("rdma exchange_buf failed: rdma_accept failed");
             return -1;
         }
     } else {
-        if (host_.empty() || rdma_exchange_info_client(&qp_, host_.c_str(), port_) != 0) {
+        if (host_.empty() || oob_exchange_client(&qp_, host_.c_str(), port_) != 0) {
             LOG_ERR("rdma exchange_buf failed: rdma_exchange_info_client failed");
             return -1;
         }
@@ -168,7 +168,7 @@ int RdmaTransport::connect(const char *host, int port) {
         return -1;
     }
 
-    if (rdma_exchange_info_client(&qp_, host, port) != 0) {
+    if (oob_exchange_client(&qp_, host, port) != 0) {
         LOG_ERR("rdma connect failed: rdma_exchange_info_client failed");
         return -1;
     }
@@ -208,7 +208,7 @@ int RdmaTransport::listen(int port) {
         return -1;
     }
 
-    if (rdma_listen(port, &listen_fd_) != 0) {
+    if (oob_listen(port, &listen_fd_) != 0) {
         LOG_ERR("rdma listen failed: rdma_listen failed");
         return -1;
     }
@@ -217,7 +217,7 @@ int RdmaTransport::listen(int port) {
 }
 
 int RdmaTransport::accept() {
-    if (rdma_accept(listen_fd_, &qp_) != 0) {
+    if (oob_accept(listen_fd_, &qp_) != 0) {
         LOG_ERR("rdma accept failed: rdma_accept failed");
         return -1;
     }

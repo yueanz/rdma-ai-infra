@@ -66,7 +66,7 @@ static void config_usage(const char *prog) {
 
 
 int main(int argc, char *argv[]) {
-    int ret = 1, i, listen_fd = -1;
+    int ret = 1, i;
     uint64_t t0, total_time;
     config_t cfg = {0};
     rdma_ctx_t ctx = {0};
@@ -81,48 +81,16 @@ int main(int argc, char *argv[]) {
         goto out;
     }
 
-    if (rdma_ctx_init(&ctx, 1, 0) != 0) {
-        LOG_ERR("context init failed");
-        goto out;
-    }
-
-    if (rdma_mr_reg(&ctx, &mr, cfg.size) != 0) {
-        LOG_ERR("memory region reg failed");
-        goto out;
-    }
-
-    if (rdma_qp_create(&ctx, &qp) != 0) {
-        LOG_ERR("queue pair create failed");
-        goto out;
-    }
-
-    if (rdma_qp_init(&ctx, &qp) != 0) {
-        LOG_ERR("queue pair init failed");
-        goto out;
-    }
-
-    qp.local.addr = (uint64_t)(uintptr_t)mr.mr->addr;
-    qp.local.rkey = mr.mr->rkey;
-
     if (cfg.server_ip == NULL) {
-        if (rdma_listen(cfg.port, &listen_fd) != 0) {
-            LOG_ERR("rdma listen failed");
+        if (rdma_cm_server(&ctx, &qp, &mr, cfg.size, cfg.port) != 0) {
+            LOG_ERR("rdma_cm_server failed");
             goto out;
         }
-        if (rdma_accept(listen_fd, &qp) != 0) {
-            LOG_ERR("rdma accept failed");
+    } else {
+        if (rdma_cm_client(&ctx, &qp, &mr, cfg.size, cfg.server_ip, cfg.port) != 0) {
+            LOG_ERR("rdma_cm_client failed");
             goto out;
         }
-    }
-
-    if (cfg.server_ip != NULL && rdma_exchange_info_client(&qp, cfg.server_ip, cfg.port) != 0) {
-        LOG_ERR("rdma exchange info client failed");
-        goto out;
-    }
-
-    if (rdma_qp_connect(&ctx, &qp) != 0) {
-        LOG_ERR("rdma queue pair connect failed");
-        goto out;
     }
 
     int total_iters = kWarmup + cfg.iters;
@@ -154,7 +122,6 @@ int main(int argc, char *argv[]) {
 
     ret = 0;
 out:
-    if (listen_fd >= 0) close(listen_fd);
     rdma_qp_destroy(&qp);
     rdma_mr_dereg(&mr);
     rdma_ctx_destroy(&ctx);
