@@ -153,7 +153,7 @@ int RdmaTransport::connect(const char *host, int port) {
         rdma_ctx_destroy(&ctx_);
     }
 
-    if (rdma_ctx_init(&ctx_, 1, 1) != 0) {
+    if (rdma_ctx_init(&ctx_, 1, 0) != 0) {
         LOG_ERR("rdma connect failed: rdma_ctx_init failed");
         return -1;
     }
@@ -193,7 +193,7 @@ int RdmaTransport::listen(int port) {
         rdma_ctx_destroy(&ctx_);
     }
 
-    if (rdma_ctx_init(&ctx_, 1, 1) != 0) {
+    if (rdma_ctx_init(&ctx_, 1, 0) != 0) {
         LOG_ERR("rdma listen failed: rdma_ctx_init failed");
         return -1;
     }

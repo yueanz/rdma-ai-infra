@@ -79,7 +79,7 @@ int main(int argc, char *argv[]) {
         goto out;
     }
 
-    if (rdma_ctx_init(&ctx, 1, 1) != 0) {
+    if (rdma_ctx_init(&ctx, 1, 0) != 0) {
         LOG_ERR("context init failed");
         goto out;
     }
