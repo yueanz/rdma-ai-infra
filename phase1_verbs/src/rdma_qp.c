@@ -107,13 +107,16 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
 
     memset(&attr, 0, sizeof(attr));
     attr.qp_state      = IBV_QPS_RTS;
-    attr.timeout       = 14;
-    attr.retry_cnt     = 7;
-    attr.rnr_retry     = 7;
     attr.sq_psn        = qp->local.psn;
     attr.max_rd_atomic = 1;
-    attr_mask = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
-        IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC;
+    attr_mask = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC;
+    /* IBV_QP_TIMEOUT/RETRY_CNT/RNR_RETRY are IB/RoCE-only; iWARP rejects them */
+    if (ctx->ctx->device->transport_type != IBV_TRANSPORT_IWARP) {
+        attr.timeout   = 14;
+        attr.retry_cnt = 7;
+        attr.rnr_retry = 7;
+        attr_mask |= IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY;
+    }
 
     // rtr -> rts
     if (ibv_modify_qp(qp->qp, &attr, attr_mask) != 0) {
