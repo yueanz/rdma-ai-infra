@@ -90,6 +90,24 @@ int rdma_cm_server(rdma_ctx_t *ctx, rdma_qp_t *qp, rdma_mr_t *mr,
     if (rdma_mr_reg(ctx, mr, mr_size)) { LOG_ERR("rdma_mr_reg failed"); goto out; }
     if (create_qp_on_id(conn_id, ctx)) { LOG_ERR("rdma_create_qp failed"); goto out; }
 
+    /* Pre-post one recv WR before accepting so it is in the QP before the
+     * client can possibly send.  Callers must not post an additional recv
+     * for their first iteration — the completion from this WR is it. */
+    {
+        struct ibv_recv_wr wr = {0}, *bad;
+        struct ibv_sge sge = {
+            .addr   = (uint64_t)(uintptr_t)mr->buf,
+            .length = (uint32_t)mr_size,
+            .lkey   = mr->mr->lkey,
+        };
+        wr.sg_list = &sge;
+        wr.num_sge = 1;
+        if (ibv_post_recv(conn_id->qp, &wr, &bad) != 0) {
+            LOG_ERR("ibv_post_recv initial recv failed");
+            goto out;
+        }
+    }
+
     local_mr.addr          = (uint64_t)(uintptr_t)mr->mr->addr;
     local_mr.rkey          = mr->mr->rkey;
     cp.private_data        = &local_mr;
