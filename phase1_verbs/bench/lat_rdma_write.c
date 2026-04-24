@@ -122,7 +122,7 @@ int main(int argc, char *argv[]) {
                 goto out;
             }
             if (i >= kWarmup)
-                latencies[i] = time_elapsed_ns(start, time_now_ns());
+                latencies[i - kWarmup] = time_elapsed_ns(start, time_now_ns());
         }
         qsort(latencies, cfg.iters, sizeof(uint64_t), cmp_u64);
         print_latency("rdma write latency (one-sided)", latencies, cfg.iters);

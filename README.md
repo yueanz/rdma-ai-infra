@@ -2,11 +2,11 @@
 
 A from-scratch implementation of RDMA communication primitives, transport abstractions, and collective operations — targeting the infrastructure layer of distributed AI training and inference systems.
 
-Built with `libibverbs` (no wrappers, no frameworks), progressing from raw verbs to a mini NCCL-style all-reduce.
+Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing from raw verbs to a mini NCCL-style all-reduce.
 
 ## Phase Status
 
-- [x] **Phase 1** — RDMA Verbs Foundation (RC QP, MR, CQ, send/recv, RDMA write, benchmarks)
+- [x] **Phase 1** — RDMA Verbs Foundation (RC QP, MR, CQ, send/recv, RDMA write, benchmarks; rdma_cm connection for iWARP/RoCE portability)
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends, send/recv + write benchmarks)
 - [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, TCP backend)
 - [x] **Phase 4b** — Remote KV Cache (slab allocator over single MR, ctrl/data plane separation, prefill via RDMA write, decode via RDMA read)
@@ -16,7 +16,7 @@ Built with `libibverbs` (no wrappers, no frameworks), progressing from raw verbs
 
 > Measured on SoftRoCE (rdma_rxe) over loopback. SoftRoCE runs in-kernel over UDP — latency is not representative of real RDMA hardware (ConnectX NICs show ~1–3 μs). Numbers here validate correctness and relative ordering only.
 
-### Phase 1 — Raw Verbs (DigitalOcean 2GB VM, Ubuntu 22.04)
+### Phase 1 — Raw Verbs (DigitalOcean 2GB VM, Ubuntu 22.04, SoftRoCE)
 
 | Benchmark | Min | Median | p99 |
 |---|---|---|---|
@@ -25,6 +25,14 @@ Built with `libibverbs` (no wrappers, no frameworks), progressing from raw verbs
 | `bw_rdma_write` (throughput) | — | 1.5 Gbps | — |
 
 **Key insight:** RDMA write is 300x lower latency than send/recv on SoftRoCE because it bypasses the kernel receive path. On real hardware the gap is even larger (~10x).
+
+### Phase 1 — rdma_cm (Alibaba Cloud ECS, eRDMA iWARP, two machines)
+
+| Benchmark | Min | Median | p99 |
+|---|---|---|---|
+| `lat_send_recv` (RTT) | 37.73 μs | 39.52 μs | 33767 μs |
+
+> eRDMA is software RDMA over TCP — latency is not representative of real RDMA hardware. p99 spike reflects OS scheduling jitter on a shared cloud VM. Connection established via rdma_cm, which provides portability across iWARP, RoCE, and InfiniBand without code changes.
 
 ### Phase 2 & 3 — Planned: Real RoCE Hardware (OCI BM.Optimized3.36)
 

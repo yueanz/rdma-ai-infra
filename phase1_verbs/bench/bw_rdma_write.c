@@ -103,9 +103,9 @@ int main(int argc, char *argv[]) {
     } else {
         // client side: only set doorbell on the last iteration
         for (i = 0; i < total_iters; i++) {
-            if (i == cfg.iters - 1) *doorbell = 1;
+            if (i == total_iters - 1) *doorbell = 1;
             if (i == kWarmup) t0 = time_now_ns();  // start timing after warmup
-            send_flags = ((i+1) % cfg.depth == 0 || i == cfg.iters-1) ? IBV_SEND_SIGNALED : 0;
+            send_flags = ((i+1) % cfg.depth == 0 || i == total_iters-1) ? IBV_SEND_SIGNALED : 0;
             if (rdma_post_write(&qp, &mr, cfg.size, send_flags,
                             qp.remote.addr, qp.remote.rkey, 1, 0) != 0) {
                 LOG_ERR("rdma post write failed");
