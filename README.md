@@ -14,37 +14,50 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing 
 
 ## Benchmark Results
 
-> Measured on SoftRoCE (rdma_rxe) over loopback. SoftRoCE runs in-kernel over UDP — latency is not representative of real RDMA hardware (ConnectX NICs show ~1–3 μs). Numbers here validate correctness and relative ordering only.
+> All Phase 1 benchmarks measured on two Alibaba Cloud ECS machines using the same rdma_cm codebase — once with eRDMA (hardware RDMA) and once with SoftRoCE (software RDMA over UDP, `rdma_rxe`). Same machines, same code, different RDMA device.
 
-### Phase 1 — Raw Verbs (DigitalOcean 2GB VM, Ubuntu 22.04, SoftRoCE)
-
-| Benchmark | Min | Median | p99 |
-|---|---|---|---|
-| `lat_send_recv` (RTT) | 1265 μs | 2000 μs | 4952 μs |
-| `lat_rdma_write` (one-sided) | 4 μs | 6 μs | 45 μs |
-| `bw_rdma_write` (throughput) | — | 1.5 Gbps | — |
-
-**Key insight:** RDMA write is 300x lower latency than send/recv on SoftRoCE because it bypasses the kernel receive path. On real hardware the gap is even larger (~10x).
-
-### Phase 1 — rdma_cm (Alibaba Cloud ECS, eRDMA, two machines)
+### Phase 1 — eRDMA (Alibaba Cloud ECS, two machines)
 
 | Benchmark | Min | Median | p99 | Max |
 |---|---|---|---|---|
-| `lat_send_recv` (RTT) | 37.76 μs | 39.93 μs | 42833 μs | 45483 μs |
-| `lat_rdma_write` (one-sided) | 30.28 μs | 31.58 μs | 37.22 μs | 51.51 μs |
+| `lat_send_recv` (RTT) | 38.30 μs | 39.93 μs | 44.96 μs | 52.59 μs |
+| `lat_rdma_write` (one-sided) | 30.32 μs | 31.46 μs | 36.24 μs | 42.41 μs |
 
 | Benchmark | Config | Throughput |
 |---|---|---|
-| `bw_rdma_write` | 1MB × 100 iters, depth=1 (burst) | 9.11 GB/s / 78 Gbps |
-| `bw_rdma_write` | 1MB × 1000 iters, depth=1 (sustained) | 3.30 GB/s / 28 Gbps |
+| `bw_rdma_write` | 1MB × 100 iters, depth=1 (burst) | 9.06 GB/s / 77.83 Gbps |
+| `bw_rdma_write` | 1MB × 1000 iters, depth=1 (sustained) | 3.30 GB/s / 28.37 Gbps |
+
+64KB depth sweep (1000 iters):
+
+| depth | eRDMA | SoftRoCE |
+|---|---|---|
+| 1 | 1.63 GB/s / 13.98 Gbps | 0.90 GB/s / 7.71 Gbps |
+| 2 | 3.01 GB/s / 25.82 Gbps | 1.27 GB/s / 10.91 Gbps |
+| 4 | 4.71 GB/s / 40.44 Gbps | 1.65 GB/s / 14.17 Gbps |
+| 8 | 5.74 GB/s / 49.33 Gbps | — (UDP buffer overflow) |
+| 16 | 6.72 GB/s / 57.76 Gbps | — |
+| 32 | WR_FLUSH_ERR | — |
 
 **Key insights:**
-- RDMA write is ~20% lower latency than send/recv (one-sided: no server-side CPU involvement)
-- RDMA write p99 (37 μs) vs send/recv p99 (43 ms) — one-sided ops are immune to OS scheduling jitter on the server
-- Burst vs sustained throughput gap (78 → 28 Gbps) reflects Alibaba Cloud eRDMA fabric QoS shaping: short transfers run at line rate, sustained transfers are throttled to a committed rate
-- eRDMA depth limit: for 1MB messages, depth > 1 (unsignaled WRs) triggers WR_FLUSH_ERR; depth=1 is required for reliable large-message benchmarking
+- RDMA write is ~21% lower latency than send/recv (median: 31 vs 40 μs) — one-sided ops bypass server-side CPU entirely
+- Burst vs sustained throughput gap (78 → 28 Gbps) reflects Alibaba Cloud eRDMA fabric QoS: short transfers run at line rate, sustained transfers are throttled to a committed rate
+- eRDMA throughput scales near-linearly to depth=8, then diminishing returns as depth=16 saturates the NIC (~58 Gbps); depth=32 hits eRDMA fabric's WR limit
+- SoftRoCE caps out at depth=4 (14 Gbps); depth≥8 triggers UDP buffer overflow — 65KB × 8 in-flight = 128 concurrent UDP packets exceeds the kernel receive buffer; eRDMA at depth=4 (40 Gbps) already outperforms SoftRoCE's ceiling
 
-> Connection established via rdma_cm, which provides portability across eRDMA/iWARP, RoCE, and InfiniBand without code changes. p99 spike on send/recv reflects OS scheduling jitter on shared cloud VMs; RDMA write p99 is clean because only one local CQ poll is needed.
+### Phase 1 — SoftRoCE (Alibaba Cloud ECS, two machines)
+
+Same physical machines as above; eRDMA unloaded (`modprobe -r erdma`), SoftRoCE loaded on the same NIC (`rdma link add rxe0 type rxe netdev eth0`). Differences reflect software vs hardware RDMA only.
+
+| Benchmark | Min | Median | p99 | Max |
+|---|---|---|---|---|
+| `lat_send_recv` (RTT) | 41.21 μs | 46.72 μs | 53.49 μs | 61.97 μs |
+| `lat_rdma_write` (one-sided) | 39.31 μs | 40.06 μs | 43.25 μs | 50.69 μs |
+
+**Key insights:**
+- eRDMA is ~22% lower latency than SoftRoCE (RDMA write median: 31 vs 40 μs) on the same hardware
+- 1MB writes fail on SoftRoCE (`transport retry counter exceeded`) due to UDP fragmentation; 64KB is the practical ceiling for rdma_rxe
+- See depth sweep table in the eRDMA section above for full throughput comparison
 
 ### Phase 2 & 3 — Planned: Real RoCE Hardware (OCI BM.Optimized3.36)
 
