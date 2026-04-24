@@ -93,15 +93,21 @@ int main(int argc, char *argv[]) {
 
     int total_iters = kWarmup + cfg.iters;
     if (cfg.server_ip == NULL) {
-        // server side
+        // server side: post first recv before loop so it's ready before client sends
+        if (rdma_post_recv(&qp, &mr, cfg.size, 1, 0) != 0) {
+            LOG_ERR("rdma post recv failed");
+            goto out;
+        }
         for (i = 0; i < total_iters; i++) {
-            if (rdma_post_recv(&qp, &mr, cfg.size, 1, 0) != 0) {
-                LOG_ERR("rdma post recv failed");
-                goto out;
-            }
             if (rdma_poll_cq(&ctx, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
+            }
+            if (i + 1 < total_iters) {
+                if (rdma_post_recv(&qp, &mr, cfg.size, 1, 0) != 0) {
+                    LOG_ERR("rdma post recv failed");
+                    goto out;
+                }
             }
             if (rdma_post_send(&qp, &mr, cfg.size, 1, 0) != 0) {
                 LOG_ERR("rdma post send failed");
