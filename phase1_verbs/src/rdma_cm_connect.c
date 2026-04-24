@@ -107,6 +107,15 @@ int rdma_cm_server(rdma_ctx_t *ctx, rdma_qp_t *qp, rdma_mr_t *mr,
     }
     rdma_ack_cm_event(event);
 
+    /* Maximize min_rnr_timer (491ms per retry × 7 = ~3.4s tolerance) so that
+     * OS scheduling jitter between ESTABLISHED and the first post_recv doesn't
+     * cause RNR retry exhaustion on software RDMA (SoftRoCE/rxe). */
+    {
+        struct ibv_qp_attr rnr_attr = {0};
+        rnr_attr.min_rnr_timer = 31;
+        ibv_modify_qp(conn_id->qp, &rnr_attr, IBV_QP_MIN_RNR_TIMER);
+    }
+
     qp->qp          = conn_id->qp;
     qp->cm_id       = conn_id;
     qp->ec          = ec;

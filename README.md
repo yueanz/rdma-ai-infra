@@ -26,13 +26,25 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing 
 
 **Key insight:** RDMA write is 300x lower latency than send/recv on SoftRoCE because it bypasses the kernel receive path. On real hardware the gap is even larger (~10x).
 
-### Phase 1 — rdma_cm (Alibaba Cloud ECS, eRDMA iWARP, two machines)
+### Phase 1 — rdma_cm (Alibaba Cloud ECS, eRDMA, two machines)
 
-| Benchmark | Min | Median | p99 |
-|---|---|---|---|
-| `lat_send_recv` (RTT) | 37.73 μs | 39.52 μs | 33767 μs |
+| Benchmark | Min | Median | p99 | Max |
+|---|---|---|---|---|
+| `lat_send_recv` (RTT) | 37.76 μs | 39.93 μs | 42833 μs | 45483 μs |
+| `lat_rdma_write` (one-sided) | 30.28 μs | 31.58 μs | 37.22 μs | 51.51 μs |
 
-> eRDMA is software RDMA over TCP — latency is not representative of real RDMA hardware. p99 spike reflects OS scheduling jitter on a shared cloud VM. Connection established via rdma_cm, which provides portability across iWARP, RoCE, and InfiniBand without code changes.
+| Benchmark | Config | Throughput |
+|---|---|---|
+| `bw_rdma_write` | 1MB × 100 iters, depth=1 (burst) | 9.11 GB/s / 78 Gbps |
+| `bw_rdma_write` | 1MB × 1000 iters, depth=1 (sustained) | 3.30 GB/s / 28 Gbps |
+
+**Key insights:**
+- RDMA write is ~20% lower latency than send/recv (one-sided: no server-side CPU involvement)
+- RDMA write p99 (37 μs) vs send/recv p99 (43 ms) — one-sided ops are immune to OS scheduling jitter on the server
+- Burst vs sustained throughput gap (78 → 28 Gbps) reflects Alibaba Cloud eRDMA fabric QoS shaping: short transfers run at line rate, sustained transfers are throttled to a committed rate
+- eRDMA depth limit: for 1MB messages, depth > 1 (unsignaled WRs) triggers WR_FLUSH_ERR; depth=1 is required for reliable large-message benchmarking
+
+> Connection established via rdma_cm, which provides portability across eRDMA/iWARP, RoCE, and InfiniBand without code changes. p99 spike on send/recv reflects OS scheduling jitter on shared cloud VMs; RDMA write p99 is clean because only one local CQ poll is needed.
 
 ### Phase 2 & 3 — Planned: Real RoCE Hardware (OCI BM.Optimized3.36)
 
@@ -170,9 +182,9 @@ cd build/phase1_verbs
 ./lat_rdma_write
 ./lat_rdma_write 127.0.0.1
 
-# Throughput
-./bw_rdma_write --size 65536 --iters 10000 --depth 32
-./bw_rdma_write 127.0.0.1 --size 65536 --iters 10000 --depth 32
+# Throughput (server and client must use the same --size)
+./bw_rdma_write --size 1048576
+./bw_rdma_write <server_ip> --size 1048576 --iters 1000 --depth 1
 
 # Phase 2
 cd build/phase2_transport
