@@ -98,6 +98,17 @@ int rdma_cm_server(rdma_ctx_t *ctx, rdma_qp_t *qp, rdma_mr_t *mr,
     cp.initiator_depth     = 1;
     if (rdma_accept(conn_id, &cp)) { LOG_ERR("rdma_accept failed"); goto out; }
 
+    /* Set min_rnr_timer to max (491ms × 7 retries = ~3.4s) immediately after
+     * rdma_accept while the QP is in RTS — before client can send any data.
+     * Prevents RNR retry exhaustion on SoftRoCE where OS scheduling may delay
+     * the server's first post_recv past the default retry window (~9ms). */
+    {
+        struct ibv_qp_attr rnr_attr = {0};
+        rnr_attr.min_rnr_timer = 31;
+        if (ibv_modify_qp(conn_id->qp, &rnr_attr, IBV_QP_MIN_RNR_TIMER) != 0)
+            LOG_ERR("ibv_modify_qp min_rnr_timer failed (non-fatal)");
+    }
+
     if (rdma_get_cm_event(ec, &event)) {
         LOG_ERR("rdma_get_cm_event failed"); goto out;
     }
@@ -106,15 +117,6 @@ int rdma_cm_server(rdma_ctx_t *ctx, rdma_qp_t *qp, rdma_mr_t *mr,
         rdma_ack_cm_event(event); goto out;
     }
     rdma_ack_cm_event(event);
-
-    /* Maximize min_rnr_timer (491ms per retry × 7 = ~3.4s tolerance) so that
-     * OS scheduling jitter between ESTABLISHED and the first post_recv doesn't
-     * cause RNR retry exhaustion on software RDMA (SoftRoCE/rxe). */
-    {
-        struct ibv_qp_attr rnr_attr = {0};
-        rnr_attr.min_rnr_timer = 31;
-        ibv_modify_qp(conn_id->qp, &rnr_attr, IBV_QP_MIN_RNR_TIMER);
-    }
 
     qp->qp          = conn_id->qp;
     qp->cm_id       = conn_id;
