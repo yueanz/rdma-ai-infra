@@ -67,7 +67,7 @@ static void config_usage(const char *prog) {
 
 int main(int argc, char *argv[]) {
     int ret = 1, i;
-    uint64_t t0, total_time;
+    uint64_t bw_start = 0, total_time;
     config_t cfg = {0};
     rdma_ctx_t ctx = {0};
     rdma_mr_t mr = {0};
@@ -104,7 +104,7 @@ int main(int argc, char *argv[]) {
         // client side: only set doorbell on the last iteration
         for (i = 0; i < total_iters; i++) {
             if (i == total_iters - 1) *doorbell = 1;
-            if (i == kWarmup) t0 = time_now_ns();  // start timing after warmup
+            if (i == kWarmup) bw_start = time_now_ns();  // start bandwidth timer after warmup
             send_flags = ((i+1) % cfg.depth == 0 || i == total_iters-1) ? IBV_SEND_SIGNALED : 0;
             if (rdma_post_write(&qp, &mr, cfg.size, send_flags,
                             qp.remote.addr, qp.remote.rkey, 1, 0) != 0) {
@@ -116,7 +116,7 @@ int main(int argc, char *argv[]) {
                 goto out;
             }
         }
-        total_time = time_elapsed_ns(t0, time_now_ns());
+        total_time = time_elapsed_ns(bw_start, time_now_ns());
         print_bandwidth("rdma write throughput", (uint64_t)cfg.size*cfg.iters, total_time);
     }
 

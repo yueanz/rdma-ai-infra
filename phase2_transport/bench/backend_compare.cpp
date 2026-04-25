@@ -127,7 +127,7 @@ int run_server_sendrecv(Transport *t, Config &cfg) {
 }
 
 int run_client_sendrecv(Transport *t, Config &cfg) {
-    uint64_t start;
+    uint64_t iter_start;
     int len = cfg.size;
     std::vector<char> buf(len);
     std::vector<uint64_t> latencies(cfg.iters);
@@ -149,10 +149,10 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
     }
 
     int total_iters = kWarmup + cfg.iters;
-    uint64_t t0;
+    uint64_t bw_start = 0;
     for (int i = 0; i < total_iters; i++) {
-        if (i == kWarmup) t0 = time_now_ns();  // start timing after warmup
-        start = time_now_ns();
+        iter_start = time_now_ns();
+        if (i == kWarmup) bw_start = iter_start;
         if (t->send_async(&sb.h, len, 1, 0) != 0) {
             LOG_ERR("run_client_sendrecv failed: send_async failed");
             return -1;
@@ -175,10 +175,10 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
             return -1;
         }
         if (i >= kWarmup)
-            latencies[i - kWarmup] = time_elapsed_ns(start, time_now_ns());
+            latencies[i - kWarmup] = time_elapsed_ns(iter_start, time_now_ns());
     }
 
-    uint64_t total_time = time_elapsed_ns(t0, time_now_ns());
+    uint64_t total_time = time_elapsed_ns(bw_start, time_now_ns());
     std::sort(latencies.begin(), latencies.end());
     print_latency(cfg.is_rdma ? "send/recv latency RTT (rdma)" : "send/recv latency RTT (tcp)", latencies.data(), cfg.iters);
     print_bandwidth("rdma send/recv throughput", (uint64_t)cfg.size*cfg.iters, total_time);
@@ -240,7 +240,7 @@ int run_server_write(Transport *t, Config &cfg) {
 int run_client_write(Transport *t, Config &cfg) {
     int len = cfg.size;
     uint32_t rkey;
-    uint64_t remote_addr, start;
+    uint64_t remote_addr, iter_start;
     std::vector<char> buf(len);
     std::vector<uint64_t> latencies(cfg.iters);
 
@@ -266,11 +266,11 @@ int run_client_write(Transport *t, Config &cfg) {
     }
 
     int total_iters = kWarmup + cfg.iters;
-    uint64_t t0;
+    uint64_t bw_start = 0;
     for (int i = 0; i < total_iters; i++) {
-        if (i == kWarmup) t0 = time_now_ns();  // start timing after warmup
         buf[len-1] = 1;  // set doorbell in local buf
-        start = time_now_ns();
+        iter_start = time_now_ns();
+        if (i == kWarmup) bw_start = iter_start;
         if (t->write_async(&sb.h, remote_addr, rkey, len, i, 0) != 0) {
             LOG_ERR("run_client_write failed: write_async failed");
             return -1;
@@ -280,10 +280,10 @@ int run_client_write(Transport *t, Config &cfg) {
             return -1;
         }
         if (i >= kWarmup)
-            latencies[i - kWarmup] = time_elapsed_ns(start, time_now_ns());
+            latencies[i - kWarmup] = time_elapsed_ns(iter_start, time_now_ns());
     }
 
-    uint64_t total_time = time_elapsed_ns(t0, time_now_ns());
+    uint64_t total_time = time_elapsed_ns(bw_start, time_now_ns());
     std::sort(latencies.begin(), latencies.end());
     print_latency(cfg.is_rdma ? "write latency (rdma)" : "write latency (tcp)", latencies.data(), cfg.iters);
     print_bandwidth("rdma write throughput", (uint64_t)cfg.size*cfg.iters, total_time);

@@ -64,7 +64,7 @@ static int cmp_u64(const void *a, const void *b) {
 
 int main(int argc, char *argv[]) {
     int ret = 1, i;
-    uint64_t start;
+    uint64_t iter_start;
     config_t cfg = {0};
     rdma_ctx_t ctx = {0};
     rdma_mr_t mr = {0};
@@ -111,7 +111,7 @@ int main(int argc, char *argv[]) {
         doorbell = (uint8_t *)mr.buf + cfg.size - 1;
         for (i = 0; i < total_iters; i++) {
             *doorbell = 1;
-            start = time_now_ns();
+            iter_start = time_now_ns();
             if (rdma_post_write(&qp, &mr, cfg.size, IBV_SEND_SIGNALED,
                             qp.remote.addr, qp.remote.rkey, 1, 0) != 0) {
                 LOG_ERR("rdma post write failed");
@@ -122,7 +122,7 @@ int main(int argc, char *argv[]) {
                 goto out;
             }
             if (i >= kWarmup)
-                latencies[i - kWarmup] = time_elapsed_ns(start, time_now_ns());
+                latencies[i - kWarmup] = time_elapsed_ns(iter_start, time_now_ns());
         }
         qsort(latencies, cfg.iters, sizeof(uint64_t), cmp_u64);
         print_latency("rdma write latency (one-sided)", latencies, cfg.iters);

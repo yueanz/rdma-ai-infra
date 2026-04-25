@@ -105,11 +105,11 @@ static int run_bench(const char *label, Transport *data, Op op,
                      size_t slot_size, int iters) {
     std::vector<uint64_t> latencies(iters);
     int total_iters = kWarmup + iters;
-    uint64_t start, t0;
+    uint64_t iter_start, bw_start = 0;
 
     for (int i = 0; i < total_iters; i++) {
-        if (i == kWarmup) t0 = time_now_ns();
-        start = time_now_ns();
+        iter_start = time_now_ns();
+        if (i == kWarmup) bw_start = iter_start;
         if (op(i) != 0) {
             LOG_ERR("run_bench failed: op failed at iter %d", i);
             return -1;
@@ -119,10 +119,10 @@ static int run_bench(const char *label, Transport *data, Op op,
             return -1;
         }
         if (i >= kWarmup)
-            latencies[i - kWarmup] = time_elapsed_ns(start, time_now_ns());
+            latencies[i - kWarmup] = time_elapsed_ns(iter_start, time_now_ns());
     }
 
-    uint64_t total_time = time_elapsed_ns(t0, time_now_ns());
+    uint64_t total_time = time_elapsed_ns(bw_start, time_now_ns());
     std::sort(latencies.begin(), latencies.end());
     print_latency(label, latencies.data(), iters);
     print_bandwidth(label, (uint64_t)iters * slot_size, total_time);

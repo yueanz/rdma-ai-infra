@@ -97,20 +97,20 @@ int main(int argc, char *argv[]){
     if (cfg.rank == 0)
         LOG_INFO("correctness check passed (expect=%.1f)", expect);
  
-    uint64_t start;
+    uint64_t iter_start;
     std::vector<uint64_t> latencies(cfg.iters);
     int total_iters = kWarmup + cfg.iters;
     for (int i = 0; i < total_iters; i++) {
         // reset buf before each iter
         for (size_t i = 0; i < buf.size(); i++)
             buf[i] = cfg.rank + 1;
-        start = time_now_ns();
+        iter_start = time_now_ns();
         if (ring_allreduce(&w, buf.data(), cfg.count) != 0) {
             LOG_ERR("ring_allreduce failed");
             return -1;
         }
         if (i >= kWarmup)
-            latencies[i - kWarmup] = time_elapsed_ns(start, time_now_ns());
+            latencies[i - kWarmup] = time_elapsed_ns(iter_start, time_now_ns());
     }
 
     if (cfg.rank == 0) {

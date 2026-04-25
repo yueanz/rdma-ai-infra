@@ -66,7 +66,7 @@ static int cmp_u64(const void *a, const void *b) {
 
 int main(int argc, char *argv[]) {
     int ret = 1, i;
-    uint64_t start;
+    uint64_t iter_start;
     config_t cfg = {0};
     rdma_ctx_t ctx = {0};
     rdma_mr_t mr = {0};
@@ -127,7 +127,7 @@ int main(int argc, char *argv[]) {
                 LOG_ERR("rdma post recv failed");
                 goto out;
             }
-            start = time_now_ns();
+            iter_start = time_now_ns();
             if (rdma_post_send(&qp, &mr, cfg.size, 1, 0) != 0) {
                 LOG_ERR("rdma post send failed");
                 goto out;
@@ -143,7 +143,7 @@ int main(int argc, char *argv[]) {
                 goto out;
             }
             if (i >= kWarmup)
-                latencies[i - kWarmup] = time_elapsed_ns(start, time_now_ns());
+                latencies[i - kWarmup] = time_elapsed_ns(iter_start, time_now_ns());
         }
 
         qsort(latencies, cfg.iters, sizeof(uint64_t), cmp_u64);
