@@ -16,7 +16,7 @@ extern "C" {
  *   addr  — pointer to the start of the buffer (caller-allocated)
  *   size  — size of the buffer in bytes
  *   priv  — backend-specific metadata:
- *             RDMA: pointer to rdma_mr_t (ibv_mr* + lkey/rkey)
+ *             RDMA: pointer to rai_mr_t (ibv_mr* + lkey/rkey)
  *             TCP:  nullptr (no registration needed)
  */
 struct BufferHandle

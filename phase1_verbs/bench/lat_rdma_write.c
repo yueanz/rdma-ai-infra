@@ -66,9 +66,9 @@ int main(int argc, char *argv[]) {
     int ret = 1, i;
     uint64_t iter_start;
     config_t cfg = {0};
-    rdma_ctx_t ctx = {0};
-    rdma_mr_t mr = {0};
-    rdma_qp_t qp = {0};
+    rai_ctx_t ctx = {0};
+    rai_mr_t mr = {0};
+    rai_qp_t qp = {0};
     uint64_t *latencies = NULL;
     volatile uint8_t *doorbell;
 
@@ -79,13 +79,13 @@ int main(int argc, char *argv[]) {
     }
 
     if (cfg.server_ip == NULL) {
-        if (rdma_cm_server(&ctx, &qp, &mr, cfg.size, cfg.port) != 0) {
-            LOG_ERR("rdma_cm_server failed");
+        if (rai_cm_server(&ctx, &qp, &mr, cfg.size, cfg.port) != 0) {
+            LOG_ERR("rai_cm_server failed");
             goto out;
         }
     } else {
-        if (rdma_cm_client(&ctx, &qp, &mr, cfg.size, cfg.server_ip, cfg.port) != 0) {
-            LOG_ERR("rdma_cm_client failed");
+        if (rai_cm_client(&ctx, &qp, &mr, cfg.size, cfg.server_ip, cfg.port) != 0) {
+            LOG_ERR("rai_cm_client failed");
             goto out;
         }
     }
@@ -112,12 +112,12 @@ int main(int argc, char *argv[]) {
         for (i = 0; i < total_iters; i++) {
             *doorbell = 1;
             iter_start = time_now_ns();
-            if (rdma_post_write(&qp, &mr, cfg.size, IBV_SEND_SIGNALED,
+            if (rai_post_write(&qp, &mr, cfg.size, IBV_SEND_SIGNALED,
                             qp.remote.addr, qp.remote.rkey, 1, 0) != 0) {
                 LOG_ERR("rdma post write failed");
                 goto out;
             }
-            if (rdma_poll_cq(&ctx, NULL) != 0) {
+            if (rai_poll_cq(&ctx, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
@@ -131,8 +131,8 @@ int main(int argc, char *argv[]) {
     ret = 0;
 out:
     free(latencies);
-    rdma_qp_destroy(&qp);
-    rdma_mr_dereg(&mr);
-    rdma_ctx_destroy(&ctx);
+    rai_qp_destroy(&qp);
+    rai_mr_dereg(&mr);
+    rai_ctx_destroy(&ctx);
     return ret;
 }

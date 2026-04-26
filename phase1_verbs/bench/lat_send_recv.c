@@ -68,9 +68,9 @@ int main(int argc, char *argv[]) {
     int ret = 1, i;
     uint64_t iter_start;
     config_t cfg = {0};
-    rdma_ctx_t ctx = {0};
-    rdma_mr_t mr = {0};
-    rdma_qp_t qp = {0};
+    rai_ctx_t ctx = {0};
+    rai_mr_t mr = {0};
+    rai_qp_t qp = {0};
     uint64_t *latencies = NULL;
 
     config_init(&cfg);
@@ -80,36 +80,36 @@ int main(int argc, char *argv[]) {
     }
 
     if (cfg.server_ip == NULL) {
-        if (rdma_cm_server(&ctx, &qp, &mr, cfg.size, cfg.port) != 0) {
-            LOG_ERR("rdma_cm_server failed");
+        if (rai_cm_server(&ctx, &qp, &mr, cfg.size, cfg.port) != 0) {
+            LOG_ERR("rai_cm_server failed");
             goto out;
         }
     } else {
-        if (rdma_cm_client(&ctx, &qp, &mr, cfg.size, cfg.server_ip, cfg.port) != 0) {
-            LOG_ERR("rdma_cm_client failed");
+        if (rai_cm_client(&ctx, &qp, &mr, cfg.size, cfg.server_ip, cfg.port) != 0) {
+            LOG_ERR("rai_cm_client failed");
             goto out;
         }
     }
 
     int total_iters = kWarmup + cfg.iters;
     if (cfg.server_ip == NULL) {
-        // rdma_cm_server pre-posted one recv WR; loop starts directly with poll
+        // rai_cm_server pre-posted one recv WR; loop starts directly with poll
         for (i = 0; i < total_iters; i++) {
-            if (rdma_poll_cq(&ctx, NULL) != 0) {
+            if (rai_poll_cq(&ctx, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
             if (i + 1 < total_iters) {
-                if (rdma_post_recv(&qp, &mr, cfg.size, 1, 0) != 0) {
+                if (rai_post_recv(&qp, &mr, cfg.size, 1, 0) != 0) {
                     LOG_ERR("rdma post recv failed");
                     goto out;
                 }
             }
-            if (rdma_post_send(&qp, &mr, cfg.size, 1, 0) != 0) {
+            if (rai_post_send(&qp, &mr, cfg.size, 1, 0) != 0) {
                 LOG_ERR("rdma post send failed");
                 goto out;
             }
-            if (rdma_poll_cq(&ctx, NULL) != 0) {
+            if (rai_poll_cq(&ctx, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
@@ -123,22 +123,22 @@ int main(int argc, char *argv[]) {
         }
 
         for (i = 0; i < total_iters; i++) {
-            if (rdma_post_recv(&qp, &mr, cfg.size, 1, 0) != 0) {
+            if (rai_post_recv(&qp, &mr, cfg.size, 1, 0) != 0) {
                 LOG_ERR("rdma post recv failed");
                 goto out;
             }
             iter_start = time_now_ns();
-            if (rdma_post_send(&qp, &mr, cfg.size, 1, 0) != 0) {
+            if (rai_post_send(&qp, &mr, cfg.size, 1, 0) != 0) {
                 LOG_ERR("rdma post send failed");
                 goto out;
             }
             // send completed
-            if (rdma_poll_cq(&ctx, NULL) != 0) {
+            if (rai_poll_cq(&ctx, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
             // recv completed
-            if (rdma_poll_cq(&ctx, NULL) != 0) {
+            if (rai_poll_cq(&ctx, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
@@ -153,8 +153,8 @@ int main(int argc, char *argv[]) {
     ret = 0;
 out:
     free(latencies);
-    rdma_qp_destroy(&qp);
-    rdma_mr_dereg(&mr);
-    rdma_ctx_destroy(&ctx);
+    rai_qp_destroy(&qp);
+    rai_mr_dereg(&mr);
+    rai_ctx_destroy(&ctx);
     return ret;
 }

@@ -69,9 +69,9 @@ int main(int argc, char *argv[]) {
     int ret = 1, i;
     uint64_t bw_start = 0, total_time;
     config_t cfg = {0};
-    rdma_ctx_t ctx = {0};
-    rdma_mr_t mr = {0};
-    rdma_qp_t qp = {0};
+    rai_ctx_t ctx = {0};
+    rai_mr_t mr = {0};
+    rai_qp_t qp = {0};
     volatile uint8_t *doorbell;
     uint32_t send_flags;
 
@@ -82,13 +82,13 @@ int main(int argc, char *argv[]) {
     }
 
     if (cfg.server_ip == NULL) {
-        if (rdma_cm_server(&ctx, &qp, &mr, cfg.size, cfg.port) != 0) {
-            LOG_ERR("rdma_cm_server failed");
+        if (rai_cm_server(&ctx, &qp, &mr, cfg.size, cfg.port) != 0) {
+            LOG_ERR("rai_cm_server failed");
             goto out;
         }
     } else {
-        if (rdma_cm_client(&ctx, &qp, &mr, cfg.size, cfg.server_ip, cfg.port) != 0) {
-            LOG_ERR("rdma_cm_client failed");
+        if (rai_cm_client(&ctx, &qp, &mr, cfg.size, cfg.server_ip, cfg.port) != 0) {
+            LOG_ERR("rai_cm_client failed");
             goto out;
         }
     }
@@ -106,12 +106,12 @@ int main(int argc, char *argv[]) {
             if (i == total_iters - 1) *doorbell = 1;
             if (i == kWarmup) bw_start = time_now_ns();  // start bandwidth timer after warmup
             send_flags = ((i+1) % cfg.depth == 0 || i == total_iters-1) ? IBV_SEND_SIGNALED : 0;
-            if (rdma_post_write(&qp, &mr, cfg.size, send_flags,
+            if (rai_post_write(&qp, &mr, cfg.size, send_flags,
                             qp.remote.addr, qp.remote.rkey, 1, 0) != 0) {
                 LOG_ERR("rdma post write failed");
                 goto out;
             }
-            if ((send_flags & IBV_SEND_SIGNALED) && rdma_poll_cq(&ctx, NULL) != 0) {
+            if ((send_flags & IBV_SEND_SIGNALED) && rai_poll_cq(&ctx, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
@@ -122,8 +122,8 @@ int main(int argc, char *argv[]) {
 
     ret = 0;
 out:
-    rdma_qp_destroy(&qp);
-    rdma_mr_dereg(&mr);
-    rdma_ctx_destroy(&ctx);
+    rai_qp_destroy(&qp);
+    rai_mr_dereg(&mr);
+    rai_ctx_destroy(&ctx);
     return ret;
 }

@@ -16,7 +16,7 @@ typedef struct {
 
 /* Allocate pd and cq from the device associated with a cm_id.
    ctx->ctx is left NULL because the verbs context is owned by rdma_cm. */
-static int setup_ctx_from_cm(rdma_ctx_t *ctx, struct rdma_cm_id *id)
+static int setup_ctx_from_cm(rai_ctx_t *ctx, struct rdma_cm_id *id)
 {
     ctx->pd = ibv_alloc_pd(id->verbs);
     if (!ctx->pd) { LOG_ERR("ibv_alloc_pd failed"); return -1; }
@@ -30,7 +30,7 @@ static int setup_ctx_from_cm(rdma_ctx_t *ctx, struct rdma_cm_id *id)
     return 0;
 }
 
-static int create_qp_on_id(struct rdma_cm_id *id, rdma_ctx_t *ctx)
+static int create_qp_on_id(struct rdma_cm_id *id, rai_ctx_t *ctx)
 {
     struct ibv_qp_init_attr attr = {0};
     attr.send_cq       = ctx->cq;
@@ -43,7 +43,7 @@ static int create_qp_on_id(struct rdma_cm_id *id, rdma_ctx_t *ctx)
     return rdma_create_qp(id, ctx->pd, &attr);
 }
 
-int rdma_cm_server(rdma_ctx_t *ctx, rdma_qp_t *qp, rdma_mr_t *mr,
+int rai_cm_server(rai_ctx_t *ctx, rai_qp_t *qp, rai_mr_t *mr,
                    size_t mr_size, int port)
 {
     struct rdma_event_channel *ec       = NULL;
@@ -87,7 +87,7 @@ int rdma_cm_server(rdma_ctx_t *ctx, rdma_qp_t *qp, rdma_mr_t *mr,
     event = NULL;
 
     if (setup_ctx_from_cm(ctx, conn_id)) goto out;
-    if (rdma_mr_reg(ctx, mr, mr_size)) { LOG_ERR("rdma_mr_reg failed"); goto out; }
+    if (rai_mr_reg(ctx, mr, mr_size)) { LOG_ERR("rai_mr_reg failed"); goto out; }
     if (create_qp_on_id(conn_id, ctx)) { LOG_ERR("rdma_create_qp failed"); goto out; }
 
     /* Pre-post one recv WR before accepting so it is in the QP before the
@@ -154,7 +154,7 @@ out:
     return ret;
 }
 
-int rdma_cm_client(rdma_ctx_t *ctx, rdma_qp_t *qp, rdma_mr_t *mr,
+int rai_cm_client(rai_ctx_t *ctx, rai_qp_t *qp, rai_mr_t *mr,
                    size_t mr_size, const char *server_ip, int port)
 {
     struct rdma_event_channel *ec    = NULL;
@@ -199,7 +199,7 @@ int rdma_cm_client(rdma_ctx_t *ctx, rdma_qp_t *qp, rdma_mr_t *mr,
     rdma_ack_cm_event(event);
 
     if (setup_ctx_from_cm(ctx, id)) goto out;
-    if (rdma_mr_reg(ctx, mr, mr_size)) { LOG_ERR("rdma_mr_reg failed"); goto out; }
+    if (rai_mr_reg(ctx, mr, mr_size)) { LOG_ERR("rai_mr_reg failed"); goto out; }
     if (create_qp_on_id(id, ctx)) { LOG_ERR("rdma_create_qp failed"); goto out; }
 
     local_mr.addr          = (uint64_t)(uintptr_t)mr->mr->addr;

@@ -12,20 +12,20 @@ RdmaTransport::~RdmaTransport() {
 }
 
 int RdmaTransport::reg_buf(void *buf, size_t size, BufferHandle *out) {
-    rdma_mr_t *mr;
+    rai_mr_t *mr;
     if (buf == nullptr || out == nullptr || size == 0) {
         LOG_ERR("rdma reg_buf failed: buf is nullptr or out is nullptr or size is 0");
         return -1;
     }
 
-    mr = new rdma_mr_t{};
+    mr = new rai_mr_t{};
     if (mr == nullptr) {
         LOG_ERR("rdma reg_buf failed: mr new failed");
         return -1;
     }
 
-    if (rdma_mr_reg_external(&ctx_, mr, buf, size) != 0) {
-        LOG_ERR("rdma reg_buf failed: rdma_mr_reg failed");
+    if (rai_mr_reg_external(&ctx_, mr, buf, size) != 0) {
+        LOG_ERR("rdma reg_buf failed: rai_mr_reg failed");
         delete(mr);
         return -1;
     }
@@ -40,8 +40,8 @@ void RdmaTransport::dereg_buf(BufferHandle *h) {
         return;
     h->addr = nullptr;
     h->size = 0;
-    rdma_mr_t *mr = (rdma_mr_t*)h->priv;
-    rdma_mr_dereg(mr);
+    rai_mr_t *mr = (rai_mr_t*)h->priv;
+    rai_mr_dereg(mr);
     delete(mr);
     h->priv = nullptr;
 }
@@ -51,8 +51,8 @@ int RdmaTransport::send_async(const BufferHandle *h, size_t len, uint64_t id, si
         LOG_ERR("rdma send_async failed: h is nullptr");
         return -1;
     }
-    if (rdma_post_send(&qp_, (rdma_mr_t*)h->priv, len, id, offset) != 0) {
-        LOG_ERR("rdma send_async failed: rdma_post_send failed");
+    if (rai_post_send(&qp_, (rai_mr_t*)h->priv, len, id, offset) != 0) {
+        LOG_ERR("rdma send_async failed: rai_post_send failed");
         return -1;
     }
     return 0;
@@ -63,8 +63,8 @@ int RdmaTransport::recv_async(BufferHandle *h, size_t len, uint64_t id, size_t o
         LOG_ERR("rdma recv_async failed: h is nullptr");
         return -1;
     }
-    if (rdma_post_recv(&qp_, (rdma_mr_t*)h->priv, len, id, offset) != 0) {
-        LOG_ERR("rdma recv_async failed: rdma_post_recv failed");
+    if (rai_post_recv(&qp_, (rai_mr_t*)h->priv, len, id, offset) != 0) {
+        LOG_ERR("rdma recv_async failed: rai_post_recv failed");
         return -1;
     }
     return 0;
@@ -72,7 +72,7 @@ int RdmaTransport::recv_async(BufferHandle *h, size_t len, uint64_t id, size_t o
 
 int RdmaTransport::exchange_buf(const BufferHandle *local, uint64_t *remote_addr,
                             uint32_t *rkey) {
-    rdma_mr_t *mr;
+    rai_mr_t *mr;
     if (local == nullptr || local->priv == nullptr) {
         LOG_ERR("rdma exchange_buf failed: local or local->priv is nullptr");
         return -1;
@@ -81,7 +81,7 @@ int RdmaTransport::exchange_buf(const BufferHandle *local, uint64_t *remote_addr
         LOG_ERR("rdma exchange_buf failed: remote_addr or rkey is nullptr");
         return -1;
     }
-    mr = (rdma_mr_t*)local->priv;
+    mr = (rai_mr_t*)local->priv;
     if (mr->mr == nullptr) {
         LOG_ERR("rdma exchange_buf failed: mr->mr is nullptr");
         return -1;
@@ -91,12 +91,12 @@ int RdmaTransport::exchange_buf(const BufferHandle *local, uint64_t *remote_addr
     qp_.local.rkey = mr->mr->rkey;
 
     if (is_server_) {
-        if (oob_accept(listen_fd_, &qp_) != 0) {
+        if (rai_oob_accept(listen_fd_, &qp_) != 0) {
             LOG_ERR("rdma exchange_buf failed: rdma_accept failed");
             return -1;
         }
     } else {
-        if (host_.empty() || oob_exchange_client(&qp_, host_.c_str(), port_) != 0) {
+        if (host_.empty() || rai_oob_exchange_client(&qp_, host_.c_str(), port_) != 0) {
             LOG_ERR("rdma exchange_buf failed: rdma_exchange_info_client failed");
             return -1;
         }
@@ -113,9 +113,9 @@ int RdmaTransport::write_async(const BufferHandle *local, uint64_t remote_addr,
         LOG_ERR("rdma write_async failed: local is nullptr");
         return -1;
     }
-    if (rdma_post_write(&qp_, (rdma_mr_t*)local->priv, len, IBV_SEND_SIGNALED,
+    if (rai_post_write(&qp_, (rai_mr_t*)local->priv, len, IBV_SEND_SIGNALED,
                             remote_addr + offset, rkey, id, offset) != 0) {
-        LOG_ERR("rdma write_async failed: rdma_post_write failed");
+        LOG_ERR("rdma write_async failed: rai_post_write failed");
         return -1;
     }
     return 0;
@@ -127,16 +127,16 @@ int RdmaTransport::read_async(const BufferHandle *local, uint64_t remote_addr,
         LOG_ERR("rdma read_async failed: local is nullptr");
         return -1;
     }
-    if (rdma_post_read(&qp_, (rdma_mr_t*)local->priv, len,
+    if (rai_post_read(&qp_, (rai_mr_t*)local->priv, len,
                             remote_addr + offset, rkey, id, offset) != 0) {
-        LOG_ERR("rdma read_async failed: rdma_post_read failed");
+        LOG_ERR("rdma read_async failed: rai_post_read failed");
         return -1;
     }
     return 0;
 }
 
 int RdmaTransport::poll(uint64_t *completed_id) {
-    return rdma_poll_cq(&ctx_, completed_id);
+    return rai_poll_cq(&ctx_, completed_id);
 }
 
 int RdmaTransport::connect(const char *host, int port) {
@@ -146,35 +146,35 @@ int RdmaTransport::connect(const char *host, int port) {
     }
 
     if (qp_.qp != nullptr) {
-        rdma_qp_destroy(&qp_);
+        rai_qp_destroy(&qp_);
     }
 
     if (ctx_.ctx != nullptr) {
-        rdma_ctx_destroy(&ctx_);
+        rai_ctx_destroy(&ctx_);
     }
 
-    if (rdma_ctx_init(&ctx_, 1, 0) != 0) {
-        LOG_ERR("rdma connect failed: rdma_ctx_init failed");
+    if (rai_ctx_init(&ctx_, 1, 0) != 0) {
+        LOG_ERR("rdma connect failed: rai_ctx_init failed");
         return -1;
     }
 
-    if (rdma_qp_create(&ctx_, &qp_) != 0) {
-        LOG_ERR("rdma connect failed: rdma_qp_create failed");
+    if (rai_qp_create(&ctx_, &qp_) != 0) {
+        LOG_ERR("rdma connect failed: rai_qp_create failed");
         return -1;
     }
 
-    if (rdma_qp_init(&ctx_, &qp_) != 0) {
-        LOG_ERR("rdma connect failed: rdma_qp_init failed");
+    if (rai_qp_init(&ctx_, &qp_) != 0) {
+        LOG_ERR("rdma connect failed: rai_qp_init failed");
         return -1;
     }
 
-    if (oob_exchange_client(&qp_, host, port) != 0) {
+    if (rai_oob_exchange_client(&qp_, host, port) != 0) {
         LOG_ERR("rdma connect failed: rdma_exchange_info_client failed");
         return -1;
     }
 
-    if (rdma_qp_connect(&ctx_, &qp_) != 0) {
-        LOG_ERR("rdma connect failed: rdma_qp_connect failed");
+    if (rai_qp_connect(&ctx_, &qp_) != 0) {
+        LOG_ERR("rdma connect failed: rai_qp_connect failed");
         return -1;
     }
 
@@ -186,29 +186,29 @@ int RdmaTransport::connect(const char *host, int port) {
 
 int RdmaTransport::listen(int port) {
     if (qp_.qp != nullptr) {
-        rdma_qp_destroy(&qp_);
+        rai_qp_destroy(&qp_);
     }
 
     if (ctx_.ctx != nullptr) {
-        rdma_ctx_destroy(&ctx_);
+        rai_ctx_destroy(&ctx_);
     }
 
-    if (rdma_ctx_init(&ctx_, 1, 0) != 0) {
-        LOG_ERR("rdma listen failed: rdma_ctx_init failed");
+    if (rai_ctx_init(&ctx_, 1, 0) != 0) {
+        LOG_ERR("rdma listen failed: rai_ctx_init failed");
         return -1;
     }
 
-    if (rdma_qp_create(&ctx_, &qp_) != 0) {
-        LOG_ERR("rdma listen failed: rdma_qp_create failed");
+    if (rai_qp_create(&ctx_, &qp_) != 0) {
+        LOG_ERR("rdma listen failed: rai_qp_create failed");
         return -1;
     }
 
-    if (rdma_qp_init(&ctx_, &qp_) != 0) {
-        LOG_ERR("rdma listen failed: rdma_qp_init failed");
+    if (rai_qp_init(&ctx_, &qp_) != 0) {
+        LOG_ERR("rdma listen failed: rai_qp_init failed");
         return -1;
     }
 
-    if (oob_listen(port, &listen_fd_) != 0) {
+    if (rai_oob_listen(port, &listen_fd_) != 0) {
         LOG_ERR("rdma listen failed: rdma_listen failed");
         return -1;
     }
@@ -217,20 +217,20 @@ int RdmaTransport::listen(int port) {
 }
 
 int RdmaTransport::accept() {
-    if (oob_accept(listen_fd_, &qp_) != 0) {
+    if (rai_oob_accept(listen_fd_, &qp_) != 0) {
         LOG_ERR("rdma accept failed: rdma_accept failed");
         return -1;
     }
-    if (rdma_qp_connect(&ctx_, &qp_) != 0) {
-        LOG_ERR("rdma accept failed: rdma_qp_connect failed");
+    if (rai_qp_connect(&ctx_, &qp_) != 0) {
+        LOG_ERR("rdma accept failed: rai_qp_connect failed");
         return -1;
     }
     return 0;
 }
 
 void RdmaTransport::close() {
-    rdma_qp_destroy(&qp_);
-    rdma_ctx_destroy(&ctx_);
+    rai_qp_destroy(&qp_);
+    rai_ctx_destroy(&ctx_);
     if (listen_fd_ >= 0) {
         ::close(listen_fd_);
         listen_fd_ = -1;

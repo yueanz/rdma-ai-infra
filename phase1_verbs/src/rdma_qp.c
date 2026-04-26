@@ -5,11 +5,11 @@
 #include <string.h>
 #include <errno.h>
 
-int rdma_qp_create(rdma_ctx_t *ctx, rdma_qp_t *qp) {
+int rai_qp_create(rai_ctx_t *ctx, rai_qp_t *qp) {
     struct ibv_qp_init_attr qp_init_attr  = {0};
 
     if (!ctx || !ctx->pd || !ctx->cq || !ctx->ctx) {
-        LOG_ERR("rdma_qp_create failed: ctx not init");
+        LOG_ERR("rai_qp_create failed: ctx not init");
         return -1;
     }
     if (qp == NULL) {
@@ -43,7 +43,7 @@ int rdma_qp_create(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     return 0;
 }
 
-int rdma_qp_init(rdma_ctx_t *ctx, rdma_qp_t *qp) {
+int rai_qp_init(rai_ctx_t *ctx, rai_qp_t *qp) {
     int attr_mask = 0;
     struct ibv_qp_attr attr = {0};
 
@@ -72,7 +72,7 @@ int rdma_qp_init(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     return 0;
 }
 
-int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
+int rai_qp_connect(rai_ctx_t *ctx, rai_qp_t *qp) {
     int attr_mask = 0;
     struct ibv_qp_attr attr = {0};
 
@@ -81,7 +81,7 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
         return -1;
     }
     if (qp == NULL || qp->qp == NULL) {
-        LOG_ERR("rdma_qp_connect failed: qp or qp->qp is null");
+        LOG_ERR("rai_qp_connect failed: qp or qp->qp is null");
         return -1;
     }
 
@@ -128,7 +128,7 @@ int rdma_qp_connect(rdma_ctx_t *ctx, rdma_qp_t *qp) {
     return 0;
 }
 
-void rdma_qp_destroy(rdma_qp_t *qp) {
+void rai_qp_destroy(rai_qp_t *qp) {
     if (qp == NULL) {
         LOG_ERR("rdma queue pair is null");
         return;

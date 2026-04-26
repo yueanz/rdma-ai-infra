@@ -5,7 +5,7 @@
 
 #define CQ_DEPTH 128
 
-int rdma_ctx_init(rdma_ctx_t *ctx, int port, int gid_index) {
+int rai_ctx_init(rai_ctx_t *ctx, int port, int gid_index) {
     if (ctx == NULL) {
         LOG_ERR("rdma context is null");
         return -1;
@@ -55,7 +55,7 @@ int rdma_ctx_init(rdma_ctx_t *ctx, int port, int gid_index) {
     return 0;
 }
 
-void rdma_ctx_destroy(rdma_ctx_t *ctx) {
+void rai_ctx_destroy(rai_ctx_t *ctx) {
     if (ctx == NULL) {
         LOG_ERR("rdma context is null");
         return;

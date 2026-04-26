@@ -2,17 +2,17 @@
 #include "logging.h"
 #include "timing.h"
 
-int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id, size_t offset) {
+int rai_post_send(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint64_t id, size_t offset) {
     struct ibv_sge sge = {0};
     struct ibv_send_wr wr = {0};
     struct ibv_send_wr *bad_wr = NULL;
 
     if (qp == NULL || qp->qp == NULL) {
-        LOG_ERR("rdma_post_send failed: qp or qp->qp is null");
+        LOG_ERR("rai_post_send failed: qp or qp->qp is null");
         return -1;
     }
     if (mr == NULL || mr->mr == NULL) {
-        LOG_ERR("rdma_post_send failed: mr or mr->mr is null");
+        LOG_ERR("rai_post_send failed: mr or mr->mr is null");
         return -1;
     }
     if (size == 0 || size > mr->size) {
@@ -37,17 +37,17 @@ int rdma_post_send(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id, siz
     return 0;
 }
 
-int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id, size_t offset) {
+int rai_post_recv(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint64_t id, size_t offset) {
     struct ibv_sge sge = {0};
     struct ibv_recv_wr wr = {0};
     struct ibv_recv_wr *bad_wr = NULL;
 
     if (qp == NULL || qp->qp == NULL) {
-        LOG_ERR("rdma_post_recv failed: qp or qp->qp is null");
+        LOG_ERR("rai_post_recv failed: qp or qp->qp is null");
         return -1;
     }
     if (mr == NULL || mr->mr == NULL) {
-        LOG_ERR("rdma_post_recv failed: mr or mr->mr is null");
+        LOG_ERR("rai_post_recv failed: mr or mr->mr is null");
         return -1;
     }
     if (size == 0 || size > mr->size) {
@@ -71,18 +71,18 @@ int rdma_post_recv(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint64_t id, siz
     return 0;
 }
 
-int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint32_t send_flags,
+int rai_post_write(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint32_t send_flags,
                     uint64_t remote_addr, uint32_t rkey, uint64_t id, size_t offset) {
     struct ibv_sge sge = {0};
     struct ibv_send_wr wr = {0};
     struct ibv_send_wr *bad_wr = NULL;
 
     if (qp == NULL || qp->qp == NULL) {
-        LOG_ERR("rdma_post_write failed: qp or qp->qp is null");
+        LOG_ERR("rai_post_write failed: qp or qp->qp is null");
         return -1;
     }
     if (mr == NULL || mr->mr == NULL) {
-        LOG_ERR("rdma_post_write failed: mr or mr->mr is null");
+        LOG_ERR("rai_post_write failed: mr or mr->mr is null");
         return -1;
     }
     if (size == 0 || size > mr->size) {
@@ -103,25 +103,25 @@ int rdma_post_write(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size, uint32_t send_f
     wr.wr.rdma.rkey = rkey;
 
     if (ibv_post_send(qp->qp, &wr, &bad_wr) != 0) {
-        LOG_ERR("rdma_post_write failed: ibv_post_send failed");
+        LOG_ERR("rai_post_write failed: ibv_post_send failed");
         return -1;
     } 
 
     return 0;
 }
 
-int rdma_post_read(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size,
+int rai_post_read(rai_qp_t *qp, rai_mr_t *mr, uint32_t size,
                     uint64_t remote_addr, uint32_t rkey, uint64_t id, size_t offset) {
     struct ibv_sge sge = {0};
     struct ibv_send_wr wr = {0};
     struct ibv_send_wr *bad_wr = NULL;
 
     if (qp == NULL || qp->qp == NULL) {
-        LOG_ERR("rdma_post_read failed: qp or qp->qp is null");
+        LOG_ERR("rai_post_read failed: qp or qp->qp is null");
         return -1;
     }
     if (mr == NULL || mr->mr == NULL) {
-        LOG_ERR("rdma_post_read failed: mr or mr->mr is null");
+        LOG_ERR("rai_post_read failed: mr or mr->mr is null");
         return -1;
     }
     if (size == 0 || size > mr->size) {
@@ -142,19 +142,19 @@ int rdma_post_read(rdma_qp_t *qp, rdma_mr_t *mr, uint32_t size,
     wr.wr.rdma.rkey = rkey;
 
     if (ibv_post_send(qp->qp, &wr, &bad_wr) != 0) {
-        LOG_ERR("rdma_post_read failed: ibv_post_send failed");
+        LOG_ERR("rai_post_read failed: ibv_post_send failed");
         return -1;
     } 
 
     return 0;
 }
 
-int rdma_poll_cq(rdma_ctx_t *ctx, uint64_t *wr_id) {
+int rai_poll_cq(rai_ctx_t *ctx, uint64_t *wr_id) {
     int n;
     struct ibv_wc wc = {0};
 
     if (ctx == NULL || ctx->cq == NULL) {
-        LOG_ERR("rdma_poll_cq failed: ctx or ctx->cq is null");
+        LOG_ERR("rai_poll_cq failed: ctx or ctx->cq is null");
         return -1;
     }
     while (1) {

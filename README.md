@@ -104,7 +104,7 @@ rdma-ai-infra/
 │
 ├── phase1_verbs/                    # Pure C ────────────────────────────
 │   ├── include/
-│   │   └── rdma_common.h            # rdma_ctx_t, rdma_qp_t, rdma_mr_t
+│   │   └── rdma_common.h            # rai_ctx_t, rai_qp_t, rai_mr_t
 │   ├── src/
 │   │   ├── rdma_context.c           # device open, PD, CQ lifecycle
 │   │   ├── rdma_qp.c                # QP create + state machine

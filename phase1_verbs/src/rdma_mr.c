@@ -2,11 +2,11 @@
 #include "logging.h"
 #include <stdlib.h>
 
-int rdma_mr_reg(rdma_ctx_t *ctx, rdma_mr_t *mr, size_t size) {
+int rai_mr_reg(rai_ctx_t *ctx, rai_mr_t *mr, size_t size) {
     void *buf;
 
     if (ctx == NULL || ctx->pd == NULL) {
-        LOG_ERR("rdma_mr_reg failed: ctx or ctx->pd is null");
+        LOG_ERR("rai_mr_reg failed: ctx or ctx->pd is null");
         return -1;
     }
     if (mr == NULL) {
@@ -30,22 +30,22 @@ int rdma_mr_reg(rdma_ctx_t *ctx, rdma_mr_t *mr, size_t size) {
     return 0;
 }
 
-int rdma_mr_reg_external(rdma_ctx_t *ctx, rdma_mr_t *mr, void *buf, size_t size) {
+int rai_mr_reg_external(rai_ctx_t *ctx, rai_mr_t *mr, void *buf, size_t size) {
     if (size == 0) {
-        LOG_ERR("rdma_mr_reg_external failed: size is 0");
+        LOG_ERR("rai_mr_reg_external failed: size is 0");
         return -1;
     }
     if (ctx == NULL || ctx->pd == NULL) {
-        LOG_ERR("rdma_mr_reg_external failed: ctx or ctx->pd is null");
+        LOG_ERR("rai_mr_reg_external failed: ctx or ctx->pd is null");
         return -1;
     }
     if (mr == NULL || buf == NULL) {
-        LOG_ERR("rdma_mr_reg_external failed: mr or buf is null");
+        LOG_ERR("rai_mr_reg_external failed: mr or buf is null");
         return -1;
     }
     mr->mr = ibv_reg_mr(ctx->pd, buf, size, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);
     if (mr->mr == NULL) {
-        LOG_ERR("rdma_mr_reg_external failed: ibv_reg_mr failed");
+        LOG_ERR("rai_mr_reg_external failed: ibv_reg_mr failed");
         return -1;
     }
     mr->buf = buf;
@@ -54,7 +54,7 @@ int rdma_mr_reg_external(rdma_ctx_t *ctx, rdma_mr_t *mr, void *buf, size_t size)
     return 0;
 }
 
-void rdma_mr_dereg(rdma_mr_t *mr) {
+void rai_mr_dereg(rai_mr_t *mr) {
     if (mr == NULL) {
         LOG_ERR("rdma memory region is null");
         return;

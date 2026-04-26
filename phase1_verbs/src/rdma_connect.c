@@ -31,7 +31,7 @@ static int recv_all(int fd, void *buf, size_t len) {
     return 0;
 }
 
-int oob_listen(int port, int *listen_fd) {
+int rai_oob_listen(int port, int *listen_fd) {
     int fd = -1, opt = 1;
     struct sockaddr_in addr = {0};
 
@@ -63,7 +63,7 @@ int oob_listen(int port, int *listen_fd) {
     return 0;
 }
 
-int oob_accept(int listen_fd, rdma_qp_t *qp) {
+int rai_oob_accept(int listen_fd, rai_qp_t *qp) {
     int conn_fd = -1;
 
     if (qp == NULL) {
@@ -93,7 +93,7 @@ int oob_accept(int listen_fd, rdma_qp_t *qp) {
     return 0;
 }
 
-int oob_exchange_client(rdma_qp_t *qp, const char *server_ip, int port) {
+int rai_oob_exchange_client(rai_qp_t *qp, const char *server_ip, int port) {
     int conn_fd = -1, ret = -1;
     struct sockaddr_in addr = {0};
     if (qp == NULL) {
