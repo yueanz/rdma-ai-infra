@@ -91,12 +91,12 @@ int RdmaTransport::exchange_buf(const BufferHandle *local, uint64_t *remote_addr
     qp_.local.rkey = mr->mr->rkey;
 
     if (is_server_) {
-        if (rai_oob_accept(listen_fd_, &qp_) != 0) {
+        if (rai_oob_accept(mr_listen_fd_, &qp_) != 0) {
             LOG_ERR("rdma exchange_buf failed: rdma_accept failed");
             return -1;
         }
     } else {
-        if (host_.empty() || rai_oob_exchange_client(&qp_, host_.c_str(), port_) != 0) {
+        if (host_.empty() || rai_oob_connect(&qp_, host_.c_str(), port_+1) != 0) {
             LOG_ERR("rdma exchange_buf failed: rdma_exchange_info_client failed");
             return -1;
         }
@@ -149,32 +149,12 @@ int RdmaTransport::connect(const char *host, int port) {
         rai_qp_destroy(&qp_);
     }
 
-    if (ctx_.ctx != nullptr) {
+    if (ctx_.pd != nullptr) {
         rai_ctx_destroy(&ctx_);
     }
 
-    if (rai_ctx_init(&ctx_, 1, 0) != 0) {
-        LOG_ERR("rdma connect failed: rai_ctx_init failed");
-        return -1;
-    }
-
-    if (rai_qp_create(&ctx_, &qp_) != 0) {
-        LOG_ERR("rdma connect failed: rai_qp_create failed");
-        return -1;
-    }
-
-    if (rai_qp_init(&ctx_, &qp_) != 0) {
-        LOG_ERR("rdma connect failed: rai_qp_init failed");
-        return -1;
-    }
-
-    if (rai_oob_exchange_client(&qp_, host, port) != 0) {
-        LOG_ERR("rdma connect failed: rdma_exchange_info_client failed");
-        return -1;
-    }
-
-    if (rai_qp_connect(&ctx_, &qp_) != 0) {
-        LOG_ERR("rdma connect failed: rai_qp_connect failed");
+    if (rai_cm_connect_qp(&ctx_, &qp_, host, port) != 0) {
+        LOG_ERR("rdma connect failed: rai_cm_connect_qp failed");
         return -1;
     }
 
@@ -189,40 +169,27 @@ int RdmaTransport::listen(int port) {
         rai_qp_destroy(&qp_);
     }
 
-    if (ctx_.ctx != nullptr) {
+    if (ctx_.pd != nullptr) {
         rai_ctx_destroy(&ctx_);
     }
 
-    if (rai_ctx_init(&ctx_, 1, 0) != 0) {
-        LOG_ERR("rdma listen failed: rai_ctx_init failed");
-        return -1;
+    if (mr_listen_fd_ >= 0) {
+        ::close(mr_listen_fd_);
+        mr_listen_fd_ = -1;
     }
 
-    if (rai_qp_create(&ctx_, &qp_) != 0) {
-        LOG_ERR("rdma listen failed: rai_qp_create failed");
+    if (rai_cm_listen_qp(&ctx_, &qp_, port, &mr_listen_fd_) != 0) {
+        LOG_ERR("rdma listen failed: rai_cm_listen_qp failed");
         return -1;
     }
-
-    if (rai_qp_init(&ctx_, &qp_) != 0) {
-        LOG_ERR("rdma listen failed: rai_qp_init failed");
-        return -1;
-    }
-
-    if (rai_oob_listen(port, &listen_fd_) != 0) {
-        LOG_ERR("rdma listen failed: rdma_listen failed");
-        return -1;
-    }
+    
     is_server_ = true;
     return 0;
 }
 
 int RdmaTransport::accept() {
-    if (rai_oob_accept(listen_fd_, &qp_) != 0) {
-        LOG_ERR("rdma accept failed: rdma_accept failed");
-        return -1;
-    }
-    if (rai_qp_connect(&ctx_, &qp_) != 0) {
-        LOG_ERR("rdma accept failed: rai_qp_connect failed");
+    if (rai_cm_accept_qp(&qp_) != 0) {
+        LOG_ERR("rdma accept failed: rai_cm_accept_qp failed");
         return -1;
     }
     return 0;
@@ -231,9 +198,9 @@ int RdmaTransport::accept() {
 void RdmaTransport::close() {
     rai_qp_destroy(&qp_);
     rai_ctx_destroy(&ctx_);
-    if (listen_fd_ >= 0) {
-        ::close(listen_fd_);
-        listen_fd_ = -1;
+    if (mr_listen_fd_ >= 0) {
+        ::close(mr_listen_fd_);
+        mr_listen_fd_ = -1;
     }
 }
 

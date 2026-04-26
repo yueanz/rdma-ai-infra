@@ -9,8 +9,19 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing 
 - [x] **Phase 1** — RDMA Verbs Foundation (RC QP, MR, CQ, send/recv, RDMA write, benchmarks; rdma_cm connection for iWARP/RoCE portability)
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends, send/recv + write benchmarks)
 - [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, TCP backend)
-- [x] **Phase 4b** — Remote KV Cache (slab allocator over single MR, ctrl/data plane separation, prefill via RDMA write, decode via RDMA read)
+- [x] **Phase 4** — Remote KV Cache (slab allocator over single MR, ctrl/data plane separation, prefill via RDMA write, decode via RDMA read)
 - [ ] **Phase 5** — vLLM KVTransferAgent Integration (pybind11 binding for Transport layer, `RdmaKVConnector` implementing `KVConnectorBase_V1`, CPU tensor path validated end-to-end, GPUDirect designed for future hardware)
+
+## Planned Refactors
+
+- [ ] **Drop the raw verbs path, keep only rdma_cm**
+  - **Why**: production target is Alibaba Cloud eRDMA (iWARP), which rejects manual `ibv_modify_qp INIT/RTR/RTS` transitions and requires rdma_cm. The raw verbs path (`rai_qp_create / rai_qp_init / rai_qp_connect / rai_oob_*`) was an early-stage learning artifact, not used in any current benchmark.
+  - **Plan**:
+    1. Tag the last commit that contains the raw verbs path as `v1.0-raw-verbs` so the code remains recoverable via `git checkout`.
+    2. Write `docs/raw-verbs-evolution.md` documenting the manual QP state machine, the OOB TCP handshake, the bugs we hit (PSN sync, GID selection, RNR retry on SoftRoCE, eRDMA rejecting manual transitions), and why we moved to rdma_cm.
+    3. Delete `rai_ctx_init / rai_qp_create / rai_qp_init / rai_qp_connect / rai_oob_listen / rai_oob_accept / rai_oob_exchange_client` from `phase1_verbs/`.
+    4. Simplify `rai_ctx_t` (drop `port` / `gid_index` fields), or fold PD/CQ into `rai_qp_t` and remove `rai_ctx_t` entirely.
+    5. Update README and add a "Design Evolution" section linking the doc.
 
 ## Benchmark Results
 
@@ -59,18 +70,19 @@ Same physical machines as above; eRDMA unloaded (`modprobe -r erdma`), SoftRoCE 
 - 1MB writes fail on SoftRoCE (`transport retry counter exceeded`) due to UDP fragmentation; 64KB is the practical ceiling for rdma_rxe
 - See depth sweep table in the eRDMA section above for full throughput comparison
 
-### Phase 2 & 3 — Planned: Real RoCE Hardware (OCI BM.Optimized3.36)
+### Phase 2 & 3 — Planned: Alibaba Cloud eRDMA (two machines)
 
-Benchmarks for Phase 2 (RDMA vs TCP backend) and Phase 3 (ring all-reduce RDMA) will be measured on two OCI BM.Optimized3.36 bare-metal instances connected via OCI RDMA cluster network (RoCE v2, Mellanox ConnectX-6). Expected results:
+Benchmarks for Phase 2 (RDMA vs TCP backend) and Phase 3 (ring all-reduce RDMA) will be measured on the same two Alibaba Cloud ECS / eRDMA setup used for Phase 1. **Note**: Phase 2's RDMA backend originally used raw verbs OOB handshake; eRDMA (iWARP-based) rejects manual `ibv_modify_qp` state transitions, so the backend was migrated to rdma_cm. See [Planned Refactors](#planned-refactors).
 
-| Benchmark | Expected |
+| Benchmark | Expected (eRDMA) |
 |---|---|
-| `lat_rdma_write` | ~1–3 μs |
-| `lat_send_recv` RDMA | ~2–5 μs |
-| `bw_rdma_write` | ~10–25 Gbps |
-| ring all-reduce RDMA, N=4, 1GB | TBD |
+| `backend_compare` RDMA write latency | ~30 μs (matches Phase 1 eRDMA `lat_rdma_write`) |
+| `backend_compare` RDMA send/recv latency | ~38 μs (matches Phase 1 eRDMA `lat_send_recv`) |
+| `backend_compare` TCP latency (kernel TCP stack) | ~80–150 μs |
+| `bw_rdma_write` | ~58 Gbps at depth=16 (NIC-bound) |
+| ring all-reduce RDMA, N=2, 4KB | TBD |
 
-> SoftRoCE (software RDMA over UDP) does not activate kernel-bypass, so RDMA vs TCP comparisons are only meaningful on real hardware.
+> Hardware target is committed to Alibaba Cloud eRDMA only — no OCI / Azure / Mellanox plans. eRDMA is iWARP-based and requires rdma_cm for connection setup; raw verbs path is being deprecated (see Planned Refactors).
 
 ### Phase 3 — Ring All-Reduce (Azure VM, TCP backend, loopback)
 
@@ -78,9 +90,9 @@ Benchmarks for Phase 2 (RDMA vs TCP backend) and Phase 3 (ring all-reduce RDMA) 
 |---|---|---|---|
 | `ring_allreduce` TCP, N=2, 1024 floats (4KB) | 45 μs | 95 μs | 121 μs |
 
-> TCP loopback baseline. RDMA backend benchmark pending real RoCE hardware.
+> TCP loopback baseline measured on Azure VM (historical, before committing to Alibaba Cloud eRDMA). RDMA backend benchmark pending eRDMA two-machine run.
 
-### Phase 4b — Remote KV Cache (slot_size=4096B)
+### Phase 4 — Remote KV Cache (slot_size=4096B)
 
 | Benchmark | Environment | Min | Median | p99 | Max |
 |---|---|---|---|---|---|
@@ -89,7 +101,7 @@ Benchmarks for Phase 2 (RDMA vs TCP backend) and Phase 3 (ring all-reduce RDMA) 
 
 Throughput (1000 iters × 4096B): prefill **0.44 GB/s / 3.79 Gbps** · decode **0.42 GB/s / 3.63 Gbps**
 
-> Prefill measured on Azure MANA RoCE hardware. Decode measured on SoftRoCE (rdma_rxe) over loopback — latency not representative of real hardware.
+> Historical: prefill measured on Azure MANA RoCE hardware before committing to Alibaba Cloud eRDMA; decode on SoftRoCE loopback. Will be re-measured on eRDMA two-machine setup as part of Phase 4 cleanup.
 
 ## Architecture
 
@@ -137,7 +149,7 @@ rdma-ai-infra/
 │   └── bench/
 │       └── allreduce_bench.cpp      # correctness check + latency benchmark
 │
-├── phase4b_kv_cache/                # C++17
+├── phase4_kv_cache/                 # C++17
 │   ├── include/
 │   │   └── kv_cache.hpp             # KVPool (slab allocator), KVRemote, KVMeta, CtrlBuf
 │   ├── src/
@@ -171,8 +183,8 @@ cmake .. && make
 ## Running Benchmarks
 
 ```bash
-# Phase 4b — Remote KV Cache
-cd build/phase4b_kv_cache
+# Phase 4 — Remote KV Cache
+cd build/phase4_kv_cache
 
 # Terminal 1 — server (port, num_slots, slot_size)
 ./kv_server 12345 16 4096

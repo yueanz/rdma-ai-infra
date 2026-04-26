@@ -90,13 +90,16 @@ void rai_qp_destroy(rai_qp_t *qp);
 /* OOB TCP helpers — used by Phase 2 transport layer */
 int rai_oob_listen(int port, int *listen_fd);
 int rai_oob_accept(int listen_fd, rai_qp_t *qp);
-int rai_oob_exchange_client(rai_qp_t *qp, const char *server_ip, int port);
+int rai_oob_connect(rai_qp_t *qp, const char *server_ip, int port);
 int rai_qp_connect(rai_ctx_t *ctx, rai_qp_t *qp);
 /* rdma_cm all-in-one connect: establishes connection, allocates ctx pd/cq,
    registers MR, and exchanges addr/rkey via private_data */
 int rai_cm_server(rai_ctx_t *ctx, rai_qp_t *qp, rai_mr_t *mr, size_t mr_size, int port);
 int rai_cm_client(rai_ctx_t *ctx, rai_qp_t *qp, rai_mr_t *mr, size_t mr_size,
                    const char *server_ip, int port);
+int rai_cm_listen_qp(rai_ctx_t *ctx, rai_qp_t *qp, int port, int *mr_listen_fd);
+int rai_cm_accept_qp(rai_qp_t *qp);
+int rai_cm_connect_qp(rai_ctx_t *ctx, rai_qp_t *qp, const char *server_ip, int port);
 int rai_post_send(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint64_t id, size_t offset);
 int rai_post_recv(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint64_t id, size_t offset);
 int rai_post_write(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint32_t send_flags,

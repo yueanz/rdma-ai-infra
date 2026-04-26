@@ -93,7 +93,7 @@ int rai_oob_accept(int listen_fd, rai_qp_t *qp) {
     return 0;
 }
 
-int rai_oob_exchange_client(rai_qp_t *qp, const char *server_ip, int port) {
+int rai_oob_connect(rai_qp_t *qp, const char *server_ip, int port) {
     int conn_fd = -1, ret = -1;
     struct sockaddr_in addr = {0};
     if (qp == NULL) {
