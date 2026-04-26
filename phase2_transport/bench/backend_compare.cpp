@@ -219,19 +219,13 @@ int run_server_write(Transport *t, Config &cfg) {
         return -1;
     }
 
-    if (cfg.is_rdma) {
-        // RDMA: doorbell polling
-        volatile uint8_t *doorbell = (uint8_t *)sb.h.addr + cfg.size - 1;
-        for (int i = 0; i < kWarmup + cfg.iters; i++) {
-            while (*doorbell == 0)
-                CPU_RELAX();
-            *doorbell = 0;
-        }
-    } else {
-        // TCP: explicit recv
-        for (int i = 0; i < kWarmup + cfg.iters; i++) {
-            t->recv_async(&sb.h, len, 1, 0);
-        }
+    // RDMA write: server CPU is uninvolved, just spins on doorbell byte
+    // (the last byte of the MR; client sets it to 1 on each write)
+    volatile uint8_t *doorbell = (uint8_t *)sb.h.addr + cfg.size - 1;
+    for (int i = 0; i < kWarmup + cfg.iters; i++) {
+        while (*doorbell == 0)
+            CPU_RELAX();
+        *doorbell = 0;
     }
 
     return 0;
@@ -319,14 +313,13 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
-        // write
-        {
-            std::unique_ptr<Transport> t(
-                cfg.is_rdma ? create_rdma_transport() : create_tcp_transport()
-            );
-            printf("=== write [%s] ===\n", cfg.is_rdma ? "rdma" : "tcp");
-            // write — use port+2 to avoid TIME_WAIT conflict with sendrecv
-            cfg.port += 2;
+        // write — RDMA only (TCP has no one-sided write primitive; any TCP
+        // emulation either measures local syscall time or degenerates into a
+        // 2-sided send/recv with explicit ACK, so we omit it).
+        if (cfg.is_rdma) {
+            std::unique_ptr<Transport> t(create_rdma_transport());
+            printf("=== write [rdma] ===\n");
+            cfg.port += 2;  // avoid TIME_WAIT conflict with sendrecv
             if (is_server) {
                 if (run_server_write(t.get(), cfg) != 0) {
                     LOG_ERR("run_server_write failed");
@@ -338,7 +331,9 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
             }
-            cfg.port -= 2;  // restore
+            cfg.port -= 2;
+        } else {
+            printf("=== write [tcp] === SKIPPED: TCP has no one-sided write primitive\n");
         }
     } catch (const std::exception &e) {
         fprintf(stderr, "error: %s\n", e.what());

@@ -7,7 +7,7 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing 
 ## Phase Status
 
 - [x] **Phase 1** — RDMA Verbs Foundation (RC QP, MR, CQ, send/recv, RDMA write, benchmarks; rdma_cm connection for iWARP/RoCE portability)
-- [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends, send/recv + write benchmarks)
+- [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends via rdma_cm, send/recv + write benchmarks; TCP write omitted — no one-sided primitive)
 - [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, TCP backend)
 - [x] **Phase 4** — Remote KV Cache (slab allocator over single MR, ctrl/data plane separation, prefill via RDMA write, decode via RDMA read)
 - [ ] **Phase 5** — vLLM KVTransferAgent Integration (pybind11 binding for Transport layer, `RdmaKVConnector` implementing `KVConnectorBase_V1`, CPU tensor path validated end-to-end, GPUDirect designed for future hardware)
@@ -70,19 +70,41 @@ Same physical machines as above; eRDMA unloaded (`modprobe -r erdma`), SoftRoCE 
 - 1MB writes fail on SoftRoCE (`transport retry counter exceeded`) due to UDP fragmentation; 64KB is the practical ceiling for rdma_rxe
 - See depth sweep table in the eRDMA section above for full throughput comparison
 
-### Phase 2 & 3 — Planned: Alibaba Cloud eRDMA (two machines)
+### Phase 2 — backend_compare (Alibaba Cloud ECS, eRDMA, two machines)
 
-Benchmarks for Phase 2 (RDMA vs TCP backend) and Phase 3 (ring all-reduce RDMA) will be measured on the same two Alibaba Cloud ECS / eRDMA setup used for Phase 1. **Note**: Phase 2's RDMA backend originally used raw verbs OOB handshake; eRDMA (iWARP-based) rejects manual `ibv_modify_qp` state transitions, so the backend was migrated to rdma_cm. See [Planned Refactors](#planned-refactors).
+Compares RDMA backend (rdma_cm + libibverbs) against TCP backend across send/recv and write semantics, at multiple message sizes.
 
-| Benchmark | Expected (eRDMA) |
-|---|---|
-| `backend_compare` RDMA write latency | ~30 μs (matches Phase 1 eRDMA `lat_rdma_write`) |
-| `backend_compare` RDMA send/recv latency | ~38 μs (matches Phase 1 eRDMA `lat_send_recv`) |
-| `backend_compare` TCP latency (kernel TCP stack) | ~80–150 μs |
-| `bw_rdma_write` | ~58 Gbps at depth=16 (NIC-bound) |
-| ring all-reduce RDMA, N=2, 4KB | TBD |
+> **Note**: Phase 2's RDMA backend originally used raw verbs OOB handshake. eRDMA (iWARP-based) rejects manual `ibv_modify_qp` state transitions, so the backend was migrated to rdma_cm — see [Planned Refactors](#planned-refactors). The migrated path is what's measured below.
 
-> Hardware target is committed to Alibaba Cloud eRDMA only — no OCI / Azure / Mellanox plans. eRDMA is iWARP-based and requires rdma_cm for connection setup; raw verbs path is being deprecated (see Planned Refactors).
+**send/recv latency (RTT, two-sided echo)**
+
+| Backend | Size | Min | Median | p99 | Max | Throughput |
+|---|---|---|---|---|---|---|
+| RDMA | 4KB | 23.42 | 25.10 | **87,806** | 90,814 | 0.01 Gbps |
+| RDMA | 64KB | 31.91 | 34.17 | 87.56† | 45,655 | 2.02 Gbps |
+| RDMA | 1MB | 119.78 | 181.25 | 617.90 | 45,550 | 23.34 Gbps |
+| TCP | 4KB | 28.70 | 30.26 | 37.89 | 45.61 | 1.07 Gbps |
+| TCP | 64KB | 84.75 | 105.99 | 115.66 | 127.46 | 4.93 Gbps |
+| TCP | 1MB | 185.34 | 198.42 | 286.02 | 4,211 | **37.84 Gbps** |
+
+† RDMA send/recv p99 is **bimodal**: clean (~87 µs) when no RNR fires; spikes to tens of ms (max column) when cloud-VM scheduling delays the server's `post_recv` past the client's send (RNR retry × `min_rnr_timer 31` = ~3.4 sec each). Run-to-run variance is huge — same code, same environment.
+
+**RDMA write latency (one-sided, no server CPU involvement)**
+
+| Size | Min | Median | p99 | Max | Throughput |
+|---|---|---|---|---|---|
+| 4KB | 16.87 | 18.11 | 22.16 | 25.35 | 1.82 Gbps |
+| 64KB | 21.32 | 23.29 | 31.13 | 64.20 | **22.36 Gbps** |
+| 1MB | 119.96 | 321.37 | 426.59 | 1,827 | 25.85 Gbps |
+
+> TCP write benchmark is **omitted**: TCP has no one-sided write primitive. Any TCP "write" either measures local syscall time (misleading — completion ≠ remote received) or degenerates into a 2-sided send/recv with explicit ACK (duplicating the send/recv numbers). RDMA write's NIC-level ACK is a protocol-level capability software cannot replicate.
+
+**Key insights:**
+
+- **At 4KB (small messages)**: RDMA write median 18 µs vs TCP send/recv 30 µs — **RDMA wins on latency** by 40%, and write is even faster than RDMA send/recv (one-sided skips server CPU).
+- **At 64KB (medium)**: RDMA write 22 Gbps vs RDMA send/recv 2 Gbps — **single-byte difference is 11×**. The send/recv throughput collapses because the RNR retry tail amplifies cloud-VM scheduling jitter into milliseconds. RDMA write is immune (server CPU not involved).
+- **At 1MB (large)**: TCP send/recv (37.84 Gbps) **outperforms** all RDMA modes (~25 Gbps). Reason: Alibaba eRDMA fabric applies QoS shaping to RDMA traffic at ~25–28 Gbps sustained (matches Phase 1 `bw_rdma_write` 28 Gbps sustained), while TCP traffic is shaped on a different policy.
+- **Practical takeaway for LLM inference (KV cache transfer)**: chunk transfers to ≤64KB, use RDMA write — avoids both the cloud QoS shaping and the RNR jitter on send/recv. Phase 4's `KVPool` design is built on this principle.
 
 ### Phase 3 — Ring All-Reduce (Azure VM, TCP backend, loopback)
 
