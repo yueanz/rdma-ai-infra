@@ -136,13 +136,13 @@ rdma-ai-infra/
 │
 ├── phase1_verbs/                    # Pure C ────────────────────────────
 │   ├── include/
-│   │   └── rdma_common.h            # rai_ctx_t, rai_qp_t, rai_mr_t
+│   │   └── rdma_common.h            # rai_qp_t, rai_mr_t, rai_conn_info_t
 │   ├── src/
-│   │   ├── rdma_context.c           # device open, PD, CQ lifecycle
-│   │   ├── rdma_qp.c                # QP create + state machine
+│   │   ├── rdma_qp.c                # rai_qp_destroy (idempotent teardown)
 │   │   ├── rdma_mr.c                # MR register / deregister
 │   │   ├── rdma_ops.c               # post_send / post_recv / post_write / poll_cq
-│   │   └── rdma_connect.c           # OOB TCP handshake
+│   │   ├── rdma_cm_connect.c        # rdma_cm-based connect (server/client/listen/accept)
+│   │   └── rdma_connect.c           # rai_oob_listen / accept / connect (TCP for MR exchange)
 │   └── bench/
 │       ├── lat_send_recv.c          # two-sided ping-pong latency
 │       ├── lat_rdma_write.c         # one-sided write latency
@@ -188,10 +188,10 @@ rdma-ai-infra/
 
 ```bash
 # On Ubuntu 22.04
-sudo apt install build-essential cmake libibverbs-dev ibverbs-utils rdma-core
-sudo apt install linux-modules-extra-$(uname -r)
+sudo apt install build-essential cmake libibverbs-dev librdmacm-dev ibverbs-utils rdma-core
 
-# Enable SoftRoCE
+# Optional: SoftRoCE for development (production target is Alibaba eRDMA)
+sudo apt install linux-modules-extra-$(uname -r)
 sudo modprobe rdma_rxe
 sudo rdma link add rxe0 type rxe netdev eth0
 

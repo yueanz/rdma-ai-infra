@@ -14,34 +14,24 @@ typedef struct {
     uint32_t rkey;
 } __attribute__((packed)) mr_info_t;
 
-/* Allocate pd and cq from the device associated with a cm_id, store on qp. */
-static int setup_pd_cq_from_cm(rai_qp_t *qp, struct rdma_cm_id *id)
+/* Build pd + cq + qp on cm_id (which provides the verbs context).
+ * On failure, qp may be partially populated; caller must rai_qp_destroy(qp)
+ * for cleanup (the destroy is idempotent and handles any partial state). */
+static int build_qp_from_cm(rai_qp_t *qp, struct rdma_cm_id *id)
 {
     qp->pd = ibv_alloc_pd(id->verbs);
     if (!qp->pd) { LOG_ERR("ibv_alloc_pd failed"); return -1; }
-    qp->cq = ibv_create_cq(id->verbs, CQ_DEPTH, NULL, NULL, 0);
-    if (!qp->cq) {
-        ibv_dealloc_pd(qp->pd);
-        qp->pd = NULL;
-        LOG_ERR("ibv_create_cq failed");
-        return -1;
-    }
-    return 0;
-}
 
-static int create_qp_on_id(struct rdma_cm_id *id, rai_qp_t *qp)
-{
-    struct ibv_qp_init_attr attr = {0};
-    attr.send_cq       = qp->cq;
-    attr.recv_cq       = qp->cq;
-    attr.qp_type       = IBV_QPT_RC;
-    attr.cap.max_send_wr  = 128;
-    attr.cap.max_recv_wr  = 128;
-    attr.cap.max_send_sge = 1;
-    attr.cap.max_recv_sge = 1;
+    qp->cq = ibv_create_cq(id->verbs, CQ_DEPTH, NULL, NULL, 0);
+    if (!qp->cq) { LOG_ERR("ibv_create_cq failed"); return -1; }
+
+    struct ibv_qp_init_attr attr = {
+        .send_cq = qp->cq, .recv_cq = qp->cq, .qp_type = IBV_QPT_RC,
+        .cap = { .max_send_wr = 128, .max_recv_wr = 128,
+                 .max_send_sge = 1, .max_recv_sge = 1 },
+    };
     if (rdma_create_qp(id, qp->pd, &attr) != 0) {
-        LOG_ERR("create_qp_on_id failed: rdma_create_qp failed");
-        return -1;
+        LOG_ERR("rdma_create_qp failed"); return -1;
     }
     qp->qp = id->qp;
     return 0;
@@ -105,9 +95,8 @@ int rai_cm_server(rai_qp_t *qp, rai_mr_t *mr, size_t mr_size, int port)
     rdma_ack_cm_event(event);
     event = NULL;
 
-    if (setup_pd_cq_from_cm(qp, conn_id)) goto out;
+    if (build_qp_from_cm(qp, conn_id)) goto out;
     if (rai_mr_reg(qp, mr, mr_size)) { LOG_ERR("rai_mr_reg failed"); goto out; }
-    if (create_qp_on_id(conn_id, qp)) { LOG_ERR("rdma_create_qp failed"); goto out; }
 
     /* Pre-post one recv WR before accepting so it is in the QP before the
      * client can possibly send.  Callers must not post an additional recv
@@ -205,9 +194,8 @@ int rai_cm_client(rai_qp_t *qp, rai_mr_t *mr, size_t mr_size,
     if (cm_wait_event(ec, RDMA_CM_EVENT_ROUTE_RESOLVED, &event)) goto out;
     rdma_ack_cm_event(event);
 
-    if (setup_pd_cq_from_cm(qp, id)) goto out;
+    if (build_qp_from_cm(qp, id)) goto out;
     if (rai_mr_reg(qp, mr, mr_size)) { LOG_ERR("rai_mr_reg failed"); goto out; }
-    if (create_qp_on_id(id, qp)) { LOG_ERR("rdma_create_qp failed"); goto out; }
 
     local_mr.addr          = (uint64_t)(uintptr_t)mr->mr->addr;
     local_mr.rkey          = mr->mr->rkey;
@@ -278,13 +266,8 @@ int rai_cm_listen_qp(rai_qp_t *qp, int port, int *mr_listen_fd) {
     rdma_ack_cm_event(event);
     event = NULL;
 
-    if (setup_pd_cq_from_cm(qp, conn_id) != 0) {
-        LOG_ERR("rai_cm_listen_qp failed: setup_pd_cq_from_cm failed");
-        goto out;
-    }
-
-    if (create_qp_on_id(conn_id, qp) != 0) {
-        LOG_ERR("rai_cm_listen_qp failed: create_qp_on_id failed");
+    if (build_qp_from_cm(qp, conn_id) != 0) {
+        LOG_ERR("rai_cm_listen_qp failed: build_qp_from_cm failed");
         goto out;
     }
 
@@ -371,13 +354,8 @@ int rai_cm_connect_qp(rai_qp_t *qp, const char *server_ip, int port) {
     if (cm_wait_event(ec, RDMA_CM_EVENT_ROUTE_RESOLVED, &event)) goto out;
     rdma_ack_cm_event(event);
 
-    if (setup_pd_cq_from_cm(qp, id) != 0) {
-        LOG_ERR("rai_cm_connect_qp failed: setup_pd_cq_from_cm failed");
-        goto out;
-    }
-
-    if (create_qp_on_id(id, qp) != 0) {
-        LOG_ERR("rai_cm_connect_qp failed: create_qp_on_id failed");
+    if (build_qp_from_cm(qp, id) != 0) {
+        LOG_ERR("rai_cm_connect_qp failed: build_qp_from_cm failed");
         goto out;
     }
 
