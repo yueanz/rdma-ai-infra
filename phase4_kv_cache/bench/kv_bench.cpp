@@ -38,18 +38,22 @@ static int config_parse(int argc, char *argv[], Config *cfg) {
     return 0;
 }
 
+/* recv_async + poll is the backend-agnostic pattern: TCP's poll is a no-op
+ * (recv_async already blocked); RDMA's poll waits for the WR to complete. */
 static int handshake_meta(KVRemote &remote, Transport *ctrl, ScopedBuffer &ctrl_sb) {
     CtrlBuf &ctrl_buf = *static_cast<CtrlBuf*>(ctrl_sb.h.addr);
 
     ctrl_buf.msg[0] = KV_MSG_META;
 
-    if (ctrl->send_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0) {
-        LOG_ERR("handshake_meta failed: send_async failed");
+    if (ctrl->send_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0 ||
+        ctrl->poll(nullptr) != 0) {
+        LOG_ERR("handshake_meta failed: send META failed");
         return -1;
     }
 
-    if (ctrl->recv_async(&ctrl_sb.h, sizeof(ctrl_buf.meta), 0, 0) != 0) {
-        LOG_ERR("handshake_meta failed: recv_async failed");
+    if (ctrl->recv_async(&ctrl_sb.h, sizeof(ctrl_buf.meta), 0, 0) != 0 ||
+        ctrl->poll(nullptr) != 0) {
+        LOG_ERR("handshake_meta failed: recv meta failed");
         return -1;
     }
 
@@ -63,13 +67,15 @@ static int kv_alloc(int &slot_idx, Transport *ctrl, ScopedBuffer &ctrl_sb) {
     CtrlBuf &ctrl_buf = *static_cast<CtrlBuf*>(ctrl_sb.h.addr);
 
     ctrl_buf.msg[0] = KV_MSG_ALLOC;
-    if (ctrl->send_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0) {
-        LOG_ERR("kv_alloc failed: send_async failed");
+    if (ctrl->send_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0 ||
+        ctrl->poll(nullptr) != 0) {
+        LOG_ERR("kv_alloc failed: send ALLOC failed");
         return -1;
     }
 
-    if (ctrl->recv_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0) {
-        LOG_ERR("kv_alloc failed: recv_async failed");
+    if (ctrl->recv_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0 ||
+        ctrl->poll(nullptr) != 0) {
+        LOG_ERR("kv_alloc failed: recv slot_idx failed");
         return -1;
     }
 
@@ -83,13 +89,15 @@ static int kv_free(int slot_idx, Transport *ctrl, ScopedBuffer &ctrl_sb) {
     ctrl_buf.msg[0] = KV_MSG_FREE;
     ctrl_buf.msg[1] = slot_idx;
 
-    if (ctrl->send_async(&ctrl_sb.h, sizeof(ctrl_buf.msg), 0, 0) != 0) {
-        LOG_ERR("kv_free failed: send_async failed");
+    if (ctrl->send_async(&ctrl_sb.h, sizeof(ctrl_buf.msg), 0, 0) != 0 ||
+        ctrl->poll(nullptr) != 0) {
+        LOG_ERR("kv_free failed: send FREE failed");
         return -1;
     }
 
-    if (ctrl->recv_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0) {
-        LOG_ERR("kv_free failed: recv_async failed");
+    if (ctrl->recv_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0 ||
+        ctrl->poll(nullptr) != 0) {
+        LOG_ERR("kv_free failed: recv ack failed");
         return -1;
     }
 

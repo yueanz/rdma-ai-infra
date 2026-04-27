@@ -28,11 +28,14 @@ static int config_parse(int argc, char *argv[], Config *cfg) {
     return 0;
 }
 
+/* recv_async + poll is the backend-agnostic pattern: TCP's poll is a no-op
+ * (recv_async already blocked); RDMA's poll waits for the WR to complete. */
 static int handshake_meta(KVPool &pool, Transport *ctrl, ScopedBuffer &ctrl_sb) {
     CtrlBuf &ctrl_buf = *static_cast<CtrlBuf*>(ctrl_sb.h.addr);
 
-    if (ctrl->recv_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0) {
-        LOG_ERR("handshake_meta failed: recv_async failed");
+    if (ctrl->recv_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0 ||
+        ctrl->poll(nullptr) != 0) {
+        LOG_ERR("handshake_meta failed: recv META failed");
         return -1;
     }
 
@@ -44,8 +47,9 @@ static int handshake_meta(KVPool &pool, Transport *ctrl, ScopedBuffer &ctrl_sb) 
     ctrl_buf.meta.num_slots = pool.num_slots;
     ctrl_buf.meta.slot_size = pool.slot_size;
 
-    if (ctrl->send_async(&ctrl_sb.h, sizeof(ctrl_buf.meta), 0, 0) != 0) {
-        LOG_ERR("handshake_meta failed: send_async failed");
+    if (ctrl->send_async(&ctrl_sb.h, sizeof(ctrl_buf.meta), 0, 0) != 0 ||
+        ctrl->poll(nullptr) != 0) {
+        LOG_ERR("handshake_meta failed: send meta failed");
         return -1;
     }
 
@@ -56,8 +60,9 @@ static int serve(KVPool &pool, Transport *ctrl, ScopedBuffer &ctrl_sb) {
     CtrlBuf &ctrl_buf = *static_cast<CtrlBuf*>(ctrl_sb.h.addr);
 
     while (1) {
-        if (ctrl->recv_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0) {
-            LOG_ERR("recv_async failed");
+        if (ctrl->recv_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0 ||
+            ctrl->poll(nullptr) != 0) {
+            LOG_ERR("serve: recv msg failed");
             return -1;
         }
 
@@ -69,13 +74,15 @@ static int serve(KVPool &pool, Transport *ctrl, ScopedBuffer &ctrl_sb) {
                 pool.free_list.pop_back();
             }
             ctrl_buf.msg[0] = slot_idx;
-            if (ctrl->send_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0) {
-                LOG_ERR("send_async failed");
+            if (ctrl->send_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0 ||
+                ctrl->poll(nullptr) != 0) {
+                LOG_ERR("serve: send ALLOC reply failed");
                 return -1;
             }
         } else if (msg == KV_MSG_FREE) {
-            if (ctrl->recv_async(&ctrl_sb.h, sizeof(int), 0, sizeof(int)) != 0) {
-                LOG_ERR("recv_async failed");
+            if (ctrl->recv_async(&ctrl_sb.h, sizeof(int), 0, sizeof(int)) != 0 ||
+                ctrl->poll(nullptr) != 0) {
+                LOG_ERR("serve: recv FREE slot_idx failed");
                 return -1;
             }
             int slot_idx = ctrl_buf.msg[1];
@@ -85,8 +92,9 @@ static int serve(KVPool &pool, Transport *ctrl, ScopedBuffer &ctrl_sb) {
             }
             pool.free_list.push_back(slot_idx);
             ctrl_buf.msg[0] = 0;    // ack
-            if (ctrl->send_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0) {
-                LOG_ERR("send_async failed");
+            if (ctrl->send_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0 ||
+                ctrl->poll(nullptr) != 0) {
+                LOG_ERR("serve: send FREE ack failed");
                 return -1;
             }
         } else {
