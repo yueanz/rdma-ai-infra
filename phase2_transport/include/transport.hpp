@@ -36,6 +36,14 @@ public:
     virtual int reg_buf(void *buf, size_t size, BufferHandle *out) = 0;
     virtual void dereg_buf(BufferHandle *h) = 0;
 
+    /*
+     * send_async / recv_async / write_async / read_async are TRULY async on
+     * RDMA (post a WR, return immediately) but BLOCKING on TCP (kernel
+     * recv/send under the hood). Caller must pair every async op with
+     * poll() to be backend-agnostic — poll() is a no-op on TCP and waits
+     * for WR completion on RDMA. Skipping poll() works on TCP today but
+     * silently breaks the moment the backend is swapped.
+     */
     virtual int send_async(const BufferHandle *h, size_t len, uint64_t id, size_t offset) = 0;
     virtual int recv_async(BufferHandle *h, size_t len, uint64_t id, size_t offset) = 0;
 
@@ -44,7 +52,7 @@ public:
     virtual int write_async(const BufferHandle *local,
                             uint64_t remote_addr, uint32_t rkey,
                             size_t len, uint64_t id, size_t offset) = 0;
-    
+
     virtual int read_async(const BufferHandle *local,
                         uint64_t remote_addr, uint32_t rkey,
                         size_t len, uint64_t id, size_t offset) = 0;

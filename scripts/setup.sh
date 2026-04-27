@@ -7,7 +7,7 @@ echo "=== Installing dependencies ==="
 sudo apt-get update -y
 sudo apt-get install -y \
     git cmake gcc g++ make \
-    libibverbs-dev ibverbs-utils \
+    libibverbs-dev librdmacm-dev ibverbs-utils \
     rdma-core \
     ibacm infiniband-diags \
     iproute2 \
@@ -75,3 +75,6 @@ echo "  phase1_verbs/lat_send_recv"
 echo "  phase1_verbs/lat_rdma_write"
 echo "  phase1_verbs/bw_rdma_write"
 echo "  phase2_transport/backend_compare"
+echo "  phase3_collective/allreduce_bench"
+echo "  phase4_kv_cache/kv_server"
+echo "  phase4_kv_cache/kv_bench"
