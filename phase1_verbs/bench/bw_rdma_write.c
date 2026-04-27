@@ -69,7 +69,6 @@ int main(int argc, char *argv[]) {
     int ret = 1, i;
     uint64_t bw_start = 0, total_time;
     config_t cfg = {0};
-    rai_ctx_t ctx = {0};
     rai_mr_t mr = {0};
     rai_qp_t qp = {0};
     volatile uint8_t *doorbell;
@@ -82,12 +81,12 @@ int main(int argc, char *argv[]) {
     }
 
     if (cfg.server_ip == NULL) {
-        if (rai_cm_server(&ctx, &qp, &mr, cfg.size, cfg.port) != 0) {
+        if (rai_cm_server(&qp, &mr, cfg.size, cfg.port) != 0) {
             LOG_ERR("rai_cm_server failed");
             goto out;
         }
     } else {
-        if (rai_cm_client(&ctx, &qp, &mr, cfg.size, cfg.server_ip, cfg.port) != 0) {
+        if (rai_cm_client(&qp, &mr, cfg.size, cfg.server_ip, cfg.port) != 0) {
             LOG_ERR("rai_cm_client failed");
             goto out;
         }
@@ -111,7 +110,7 @@ int main(int argc, char *argv[]) {
                 LOG_ERR("rdma post write failed");
                 goto out;
             }
-            if ((send_flags & IBV_SEND_SIGNALED) && rai_poll_cq(&ctx, NULL) != 0) {
+            if ((send_flags & IBV_SEND_SIGNALED) && rai_poll_cq(&qp, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
@@ -122,8 +121,7 @@ int main(int argc, char *argv[]) {
 
     ret = 0;
 out:
+    rai_mr_dereg(&mr);    /* MR depends on PD — must dereg before qp_destroy */
     rai_qp_destroy(&qp);
-    rai_mr_dereg(&mr);
-    rai_ctx_destroy(&ctx);
     return ret;
 }

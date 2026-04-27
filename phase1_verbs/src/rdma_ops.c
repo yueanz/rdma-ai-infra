@@ -149,16 +149,16 @@ int rai_post_read(rai_qp_t *qp, rai_mr_t *mr, uint32_t size,
     return 0;
 }
 
-int rai_poll_cq(rai_ctx_t *ctx, uint64_t *wr_id) {
+int rai_poll_cq(rai_qp_t *qp, uint64_t *wr_id) {
     int n;
     struct ibv_wc wc = {0};
 
-    if (ctx == NULL || ctx->cq == NULL) {
-        LOG_ERR("rai_poll_cq failed: ctx or ctx->cq is null");
+    if (qp == NULL || qp->cq == NULL) {
+        LOG_ERR("rai_poll_cq failed: qp or qp->cq is null");
         return -1;
     }
     while (1) {
-        n = ibv_poll_cq(ctx->cq, 1, &wc);
+        n = ibv_poll_cq(qp->cq, 1, &wc);
         if (n < 0) {
             LOG_ERR("ibv poll completion queue failed");
             return -1;

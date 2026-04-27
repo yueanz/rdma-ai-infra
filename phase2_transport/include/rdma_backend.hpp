@@ -30,7 +30,6 @@ public:
     void close() override;
 
 private:
-    rai_ctx_t ctx_;
     rai_qp_t qp_;
     int port_ = -1;
     int mr_listen_fd_ = -1;

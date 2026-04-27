@@ -14,14 +14,12 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing 
 
 ## Planned Refactors
 
-- [ ] **Drop the raw verbs path, keep only rdma_cm**
-  - **Why**: production target is Alibaba Cloud eRDMA (iWARP), which rejects manual `ibv_modify_qp INIT/RTR/RTS` transitions and requires rdma_cm. The raw verbs path (`rai_qp_create / rai_qp_init / rai_qp_connect / rai_oob_*`) was an early-stage learning artifact, not used in any current benchmark.
-  - **Plan**:
-    1. Tag the last commit that contains the raw verbs path as `v1.0-raw-verbs` so the code remains recoverable via `git checkout`.
-    2. Write `docs/raw-verbs-evolution.md` documenting the manual QP state machine, the OOB TCP handshake, the bugs we hit (PSN sync, GID selection, RNR retry on SoftRoCE, eRDMA rejecting manual transitions), and why we moved to rdma_cm.
-    3. Delete `rai_ctx_init / rai_qp_create / rai_qp_init / rai_qp_connect / rai_oob_listen / rai_oob_accept / rai_oob_exchange_client` from `phase1_verbs/`.
-    4. Simplify `rai_ctx_t` (drop `port` / `gid_index` fields), or fold PD/CQ into `rai_qp_t` and remove `rai_ctx_t` entirely.
-    5. Update README and add a "Design Evolution" section linking the doc.
+- [x] **Drop the raw verbs path, keep only rdma_cm**
+  - **Why**: production target is Alibaba Cloud eRDMA (iWARP), which rejects manual `ibv_modify_qp INIT/RTR/RTS` transitions and requires rdma_cm. The raw verbs path was an early-stage learning artifact, not used in any current benchmark.
+  - **Done**: Deleted `rai_ctx_init / rai_qp_create / rai_qp_init / rai_qp_connect` (~200 LOC removed); simplified `rai_ctx_t` (dropped `port` / `gid_index` fields). The OOB TCP helpers (`rai_oob_listen / accept / connect`) remain because they're now used by `rai_cm_listen_qp` to set up the MR-exchange channel on `port+1`.
+- [ ] **Write `docs/raw-verbs-evolution.md`** retrospective covering the manual QP state machine, OOB TCP handshake, bugs we hit (PSN sync, GID selection, RNR retry on SoftRoCE, eRDMA rejecting manual transitions), and why we moved to rdma_cm. Tag a commit on the pre-cleanup snapshot for reference.
+- [ ] **Re-measure Phase 4 on Alibaba eRDMA** — current Phase 4 numbers are from Azure MANA RoCE (prefill) and SoftRoCE loopback (decode), historical before the eRDMA commitment.
+- [x] **Fold `rai_ctx_t` into `rai_qp_t` and delete `rdma_context.c`** — Done. Moved PD/CQ into `rai_qp_t`, deleted `rai_ctx_t` and `rdma_context.c`, simplified all APIs from `(ctx, qp)` to `(qp)` (`rai_mr_reg`, `rai_poll_cq`, `rai_cm_server/client/listen_qp/connect_qp`). Updated ~70 call sites across phase1 verbs/benchmarks and phase2 backend.
 
 ## Benchmark Results
 

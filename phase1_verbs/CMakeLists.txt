@@ -9,7 +9,6 @@ set(COMMON_INC ${CMAKE_SOURCE_DIR}/common/include)
 
 # phase1 static library
 add_library(rdma_verbs STATIC
-    src/rdma_context.c
     src/rdma_mr.c
     src/rdma_qp.c
     src/rdma_connect.c

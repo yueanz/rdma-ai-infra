@@ -14,33 +14,37 @@ typedef struct {
     uint32_t rkey;
 } __attribute__((packed)) mr_info_t;
 
-/* Allocate pd and cq from the device associated with a cm_id.
-   ctx->ctx is left NULL because the verbs context is owned by rdma_cm. */
-static int setup_ctx_from_cm(rai_ctx_t *ctx, struct rdma_cm_id *id)
+/* Allocate pd and cq from the device associated with a cm_id, store on qp. */
+static int setup_pd_cq_from_cm(rai_qp_t *qp, struct rdma_cm_id *id)
 {
-    ctx->pd = ibv_alloc_pd(id->verbs);
-    if (!ctx->pd) { LOG_ERR("ibv_alloc_pd failed"); return -1; }
-    ctx->cq = ibv_create_cq(id->verbs, CQ_DEPTH, NULL, NULL, 0);
-    if (!ctx->cq) {
-        ibv_dealloc_pd(ctx->pd);
-        ctx->pd = NULL;
+    qp->pd = ibv_alloc_pd(id->verbs);
+    if (!qp->pd) { LOG_ERR("ibv_alloc_pd failed"); return -1; }
+    qp->cq = ibv_create_cq(id->verbs, CQ_DEPTH, NULL, NULL, 0);
+    if (!qp->cq) {
+        ibv_dealloc_pd(qp->pd);
+        qp->pd = NULL;
         LOG_ERR("ibv_create_cq failed");
         return -1;
     }
     return 0;
 }
 
-static int create_qp_on_id(struct rdma_cm_id *id, rai_ctx_t *ctx)
+static int create_qp_on_id(struct rdma_cm_id *id, rai_qp_t *qp)
 {
     struct ibv_qp_init_attr attr = {0};
-    attr.send_cq       = ctx->cq;
-    attr.recv_cq       = ctx->cq;
+    attr.send_cq       = qp->cq;
+    attr.recv_cq       = qp->cq;
     attr.qp_type       = IBV_QPT_RC;
     attr.cap.max_send_wr  = 128;
     attr.cap.max_recv_wr  = 128;
     attr.cap.max_send_sge = 1;
     attr.cap.max_recv_sge = 1;
-    return rdma_create_qp(id, ctx->pd, &attr);
+    if (rdma_create_qp(id, qp->pd, &attr) != 0) {
+        LOG_ERR("create_qp_on_id failed: rdma_create_qp failed");
+        return -1;
+    }
+    qp->qp = id->qp;
+    return 0;
 }
 
 static int cm_wait_event(struct rdma_event_channel *ec, enum rdma_cm_event_type expected, struct rdma_cm_event **out_event) {
@@ -50,13 +54,14 @@ static int cm_wait_event(struct rdma_event_channel *ec, enum rdma_cm_event_type 
     }
     if ((*out_event)->event != expected) {
         LOG_ERR("cm_wait_event failed: expected %s, got %s", rdma_event_str(expected), rdma_event_str((*out_event)->event));
+        rdma_ack_cm_event(*out_event);   /* must ack even on error or events leak */
+        *out_event = NULL;
         return -1;
     }
     return 0;
 }
 
-int rai_cm_server(rai_ctx_t *ctx, rai_qp_t *qp, rai_mr_t *mr,
-                   size_t mr_size, int port)
+int rai_cm_server(rai_qp_t *qp, rai_mr_t *mr, size_t mr_size, int port)
 {
     struct rdma_event_channel *ec       = NULL;
     struct rdma_cm_id         *listen_id = NULL;
@@ -68,33 +73,41 @@ int rai_cm_server(rai_ctx_t *ctx, rai_qp_t *qp, rai_mr_t *mr,
     int ret = -1;
 
     ec = rdma_create_event_channel();
-    if (!ec) { LOG_ERR("rdma_create_event_channel failed"); goto out; }
+    if (!ec) {
+        LOG_ERR("rdma_create_event_channel failed"); 
+        goto out; 
+    }
+    qp->ec = ec;
 
     if (rdma_create_id(ec, &listen_id, NULL, RDMA_PS_TCP)) {
-        LOG_ERR("rdma_create_id failed"); goto out;
+        LOG_ERR("rdma_create_id failed");
+        goto out;
     }
 
     addr.sin_family      = AF_INET;
     addr.sin_port        = htons(port);
     addr.sin_addr.s_addr = INADDR_ANY;
     if (rdma_bind_addr(listen_id, (struct sockaddr *)&addr)) {
-        LOG_ERR("rdma_bind_addr failed"); goto out;
+        LOG_ERR("rdma_bind_addr failed");
+        goto out;
     }
     if (rdma_listen(listen_id, 1)) {
-        LOG_ERR("rdma_listen failed"); goto out;
+        LOG_ERR("rdma_listen failed");
+        goto out;
     }
     LOG_INFO("waiting for rdma_cm connection on port %d", port);
 
     if (cm_wait_event(ec, RDMA_CM_EVENT_CONNECT_REQUEST, &event)) goto out;
     conn_id = event->id;
+    qp->cm_id = conn_id;  /* transfer ownership early so cleanup catches it */
     if (event->param.conn.private_data_len >= sizeof(mr_info_t))
         memcpy(&peer_mr, event->param.conn.private_data, sizeof(mr_info_t));
     rdma_ack_cm_event(event);
     event = NULL;
 
-    if (setup_ctx_from_cm(ctx, conn_id)) goto out;
-    if (rai_mr_reg(ctx, mr, mr_size)) { LOG_ERR("rai_mr_reg failed"); goto out; }
-    if (create_qp_on_id(conn_id, ctx)) { LOG_ERR("rdma_create_qp failed"); goto out; }
+    if (setup_pd_cq_from_cm(qp, conn_id)) goto out;
+    if (rai_mr_reg(qp, mr, mr_size)) { LOG_ERR("rai_mr_reg failed"); goto out; }
+    if (create_qp_on_id(conn_id, qp)) { LOG_ERR("rdma_create_qp failed"); goto out; }
 
     /* Pre-post one recv WR before accepting so it is in the QP before the
      * client can possibly send.  Callers must not post an additional recv
@@ -136,26 +149,26 @@ int rai_cm_server(rai_ctx_t *ctx, rai_qp_t *qp, rai_mr_t *mr,
     if (cm_wait_event(ec, RDMA_CM_EVENT_ESTABLISHED, &event)) goto out;
     rdma_ack_cm_event(event);
 
-    qp->qp          = conn_id->qp;
-    qp->cm_id       = conn_id;
-    qp->ec          = ec;
+    /* qp->qp / cm_id / ec already set above; just record the MR exchange info */
     qp->local.addr  = local_mr.addr;
     qp->local.rkey  = local_mr.rkey;
     qp->remote.addr = peer_mr.addr;
     qp->remote.rkey = peer_mr.rkey;
-    conn_id = NULL;
-    ec      = NULL;
+
     ret     = 0;
 
 out:
-    if (listen_id) rdma_destroy_id(listen_id);
-    if (conn_id)   { if (conn_id->qp) rdma_destroy_qp(conn_id); rdma_destroy_id(conn_id); }
-    if (ec)        rdma_destroy_event_channel(ec);
+    if (listen_id)
+        rdma_destroy_id(listen_id);
+    if (ret != 0) {
+        rai_mr_dereg(mr);   /* MR depends on PD — must dereg before qp_destroy */
+        rai_qp_destroy(qp);
+    }
     return ret;
 }
 
-int rai_cm_client(rai_ctx_t *ctx, rai_qp_t *qp, rai_mr_t *mr,
-                   size_t mr_size, const char *server_ip, int port)
+int rai_cm_client(rai_qp_t *qp, rai_mr_t *mr, size_t mr_size,
+                  const char *server_ip, int port)
 {
     struct rdma_event_channel *ec    = NULL;
     struct rdma_cm_id         *id    = NULL;
@@ -167,10 +180,12 @@ int rai_cm_client(rai_ctx_t *ctx, rai_qp_t *qp, rai_mr_t *mr,
 
     ec = rdma_create_event_channel();
     if (!ec) { LOG_ERR("rdma_create_event_channel failed"); goto out; }
+    qp->ec = ec;
 
     if (rdma_create_id(ec, &id, NULL, RDMA_PS_TCP)) {
         LOG_ERR("rdma_create_id failed"); goto out;
     }
+    qp->cm_id = id;
 
     addr.sin_family = AF_INET;
     addr.sin_port   = htons(port);
@@ -190,9 +205,9 @@ int rai_cm_client(rai_ctx_t *ctx, rai_qp_t *qp, rai_mr_t *mr,
     if (cm_wait_event(ec, RDMA_CM_EVENT_ROUTE_RESOLVED, &event)) goto out;
     rdma_ack_cm_event(event);
 
-    if (setup_ctx_from_cm(ctx, id)) goto out;
-    if (rai_mr_reg(ctx, mr, mr_size)) { LOG_ERR("rai_mr_reg failed"); goto out; }
-    if (create_qp_on_id(id, ctx)) { LOG_ERR("rdma_create_qp failed"); goto out; }
+    if (setup_pd_cq_from_cm(qp, id)) goto out;
+    if (rai_mr_reg(qp, mr, mr_size)) { LOG_ERR("rai_mr_reg failed"); goto out; }
+    if (create_qp_on_id(id, qp)) { LOG_ERR("rdma_create_qp failed"); goto out; }
 
     local_mr.addr          = (uint64_t)(uintptr_t)mr->mr->addr;
     local_mr.rkey          = mr->mr->rkey;
@@ -207,24 +222,23 @@ int rai_cm_client(rai_ctx_t *ctx, rai_qp_t *qp, rai_mr_t *mr,
         memcpy(&peer_mr, event->param.conn.private_data, sizeof(mr_info_t));
     rdma_ack_cm_event(event);
 
-    qp->qp          = id->qp;
-    qp->cm_id       = id;
-    qp->ec          = ec;
+    /* qp->qp / cm_id / ec already set above; just record the MR exchange info */
     qp->local.addr  = local_mr.addr;
     qp->local.rkey  = local_mr.rkey;
     qp->remote.addr = peer_mr.addr;
     qp->remote.rkey = peer_mr.rkey;
-    id = NULL;
-    ec = NULL;
+
     ret = 0;
 
 out:
-    if (id) { if (id->qp) rdma_destroy_qp(id); rdma_destroy_id(id); }
-    if (ec) rdma_destroy_event_channel(ec);
+    if (ret != 0) {
+        rai_mr_dereg(mr);   /* MR depends on PD — must dereg before qp_destroy */
+        rai_qp_destroy(qp);
+    }
     return ret;
 }
 
-int rai_cm_listen_qp(rai_ctx_t *ctx, rai_qp_t *qp, int port, int *mr_listen_fd) {
+int rai_cm_listen_qp(rai_qp_t *qp, int port, int *mr_listen_fd) {
     struct rdma_event_channel *ec = NULL;
     struct rdma_cm_id *listen_id = NULL;
     struct rdma_cm_id *conn_id = NULL;
@@ -234,12 +248,13 @@ int rai_cm_listen_qp(rai_ctx_t *ctx, rai_qp_t *qp, int port, int *mr_listen_fd) 
 
     ec = rdma_create_event_channel();
     if (ec == NULL) {
-        LOG_ERR("rdma_cm_listen_qp failed: ec is null");
+        LOG_ERR("rai_cm_listen_qp failed: rdma_create_event_channel failed");
         goto out;
     }
+    qp->ec = ec;
 
     if (rdma_create_id(ec, &listen_id, NULL, RDMA_PS_TCP) != 0) {
-        LOG_ERR("rdma_cm_listen_qp failled: rdma_creat_id failed");
+        LOG_ERR("rai_cm_listen_qp failed: rdma_create_id failed");
         goto out;
     }
 
@@ -259,41 +274,32 @@ int rai_cm_listen_qp(rai_ctx_t *ctx, rai_qp_t *qp, int port, int *mr_listen_fd) 
     
     if (cm_wait_event(ec, RDMA_CM_EVENT_CONNECT_REQUEST, &event)) goto out;
     conn_id = event->id;
+    qp->cm_id = conn_id;  /* transfer ownership early so cleanup catches it */
     rdma_ack_cm_event(event);
     event = NULL;
 
-    if (setup_ctx_from_cm(ctx, conn_id) != 0) {
-        LOG_ERR("rdma_cm_listen_qp failed: setup_ctx_from_cm failed");
+    if (setup_pd_cq_from_cm(qp, conn_id) != 0) {
+        LOG_ERR("rai_cm_listen_qp failed: setup_pd_cq_from_cm failed");
         goto out;
     }
 
-    if (create_qp_on_id(conn_id, ctx) != 0) {
-        LOG_ERR("rdma_cm_listen_qp failed: create_qp_on_id failed");
+    if (create_qp_on_id(conn_id, qp) != 0) {
+        LOG_ERR("rai_cm_listen_qp failed: create_qp_on_id failed");
         goto out;
     }
 
     if (rai_oob_listen(port + 1, mr_listen_fd) != 0) {
-        LOG_ERR("rdma_cm_listen_qp failed: rai_oob_listen failed");
+        LOG_ERR("rai_cm_listen_qp failed: rai_oob_listen failed");
         goto out;
     }
 
-    qp->qp = conn_id->qp;
-    qp->cm_id = conn_id;
-    qp->ec = ec;
-    conn_id = NULL;
-    ec = NULL;
-
+    /* qp->qp / cm_id / ec already set above */
     ret = 0;
 out:
-    if (ec)
-        rdma_destroy_event_channel(ec);
     if (listen_id)
         rdma_destroy_id(listen_id);
-    if (conn_id) {
-        if (conn_id->qp)
-            rdma_destroy_qp(conn_id);
-        rdma_destroy_id(conn_id);
-    }
+    if (ret != 0)
+        rai_qp_destroy(qp);
         
     return ret;
 }
@@ -323,7 +329,7 @@ int rai_cm_accept_qp(rai_qp_t *qp) {
     return 0;
 }
 
-int rai_cm_connect_qp(rai_ctx_t *ctx, rai_qp_t *qp, const char *server_ip, int port) {
+int rai_cm_connect_qp(rai_qp_t *qp, const char *server_ip, int port) {
     struct rdma_event_channel *ec = NULL;
     struct rdma_cm_id *id = NULL;
     struct sockaddr_in addr  = {0};
@@ -336,11 +342,13 @@ int rai_cm_connect_qp(rai_ctx_t *ctx, rai_qp_t *qp, const char *server_ip, int p
         LOG_ERR("rai_cm_connect_qp failed: rdma_create_event_channel failed");
         goto out;
     }
+    qp->ec = ec;
 
     if (rdma_create_id(ec, &id, NULL, RDMA_PS_TCP) != 0) {
         LOG_ERR("rai_cm_connect_qp failed: rdma_create_id failed");
         goto out;
     }
+    qp->cm_id = id;
 
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
@@ -363,12 +371,12 @@ int rai_cm_connect_qp(rai_ctx_t *ctx, rai_qp_t *qp, const char *server_ip, int p
     if (cm_wait_event(ec, RDMA_CM_EVENT_ROUTE_RESOLVED, &event)) goto out;
     rdma_ack_cm_event(event);
 
-    if (setup_ctx_from_cm(ctx, id) != 0) {
-        LOG_ERR("rai_cm_connect_qp failed: setup_ctx_from_cm failed");
+    if (setup_pd_cq_from_cm(qp, id) != 0) {
+        LOG_ERR("rai_cm_connect_qp failed: setup_pd_cq_from_cm failed");
         goto out;
     }
 
-    if (create_qp_on_id(id, ctx) != 0) {
+    if (create_qp_on_id(id, qp) != 0) {
         LOG_ERR("rai_cm_connect_qp failed: create_qp_on_id failed");
         goto out;
     }
@@ -383,20 +391,10 @@ int rai_cm_connect_qp(rai_ctx_t *ctx, rai_qp_t *qp, const char *server_ip, int p
     if (cm_wait_event(ec, RDMA_CM_EVENT_ESTABLISHED, &event)) goto out;
     rdma_ack_cm_event(event);
 
-    qp->qp = id->qp;
-    qp->cm_id = id;
-    qp->ec = ec;
-    id = NULL;
-    ec = NULL;
-
+    /* qp->qp / cm_id / ec already set above */
     ret = 0;
 out:
-    if (id) {
-        if (id->qp)
-            rdma_destroy_qp(id);
-        rdma_destroy_id(id);
-    }
-    if (ec)
-        rdma_destroy_event_channel(ec);
+    if (ret != 0)
+        rai_qp_destroy(qp);
     return ret;
 }

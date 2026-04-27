@@ -3,7 +3,6 @@
 #include <unistd.h>
 
 RdmaTransport::RdmaTransport() {
-    memset(&ctx_, 0, sizeof(ctx_));
     memset(&qp_, 0, sizeof(qp_));
 }
 
@@ -24,7 +23,7 @@ int RdmaTransport::reg_buf(void *buf, size_t size, BufferHandle *out) {
         return -1;
     }
 
-    if (rai_mr_reg_external(&ctx_, mr, buf, size) != 0) {
+    if (rai_mr_reg_external(&qp_, mr, buf, size) != 0) {
         LOG_ERR("rdma reg_buf failed: rai_mr_reg failed");
         delete(mr);
         return -1;
@@ -136,7 +135,7 @@ int RdmaTransport::read_async(const BufferHandle *local, uint64_t remote_addr,
 }
 
 int RdmaTransport::poll(uint64_t *completed_id) {
-    return rai_poll_cq(&ctx_, completed_id);
+    return rai_poll_cq(&qp_, completed_id);
 }
 
 int RdmaTransport::connect(const char *host, int port) {
@@ -149,11 +148,10 @@ int RdmaTransport::connect(const char *host, int port) {
         rai_qp_destroy(&qp_);
     }
 
-    if (ctx_.pd != nullptr) {
-        rai_ctx_destroy(&ctx_);
+    if (qp_.pd != nullptr) {
     }
 
-    if (rai_cm_connect_qp(&ctx_, &qp_, host, port) != 0) {
+    if (rai_cm_connect_qp(&qp_, host, port) != 0) {
         LOG_ERR("rdma connect failed: rai_cm_connect_qp failed");
         return -1;
     }
@@ -169,8 +167,7 @@ int RdmaTransport::listen(int port) {
         rai_qp_destroy(&qp_);
     }
 
-    if (ctx_.pd != nullptr) {
-        rai_ctx_destroy(&ctx_);
+    if (qp_.pd != nullptr) {
     }
 
     if (mr_listen_fd_ >= 0) {
@@ -178,7 +175,7 @@ int RdmaTransport::listen(int port) {
         mr_listen_fd_ = -1;
     }
 
-    if (rai_cm_listen_qp(&ctx_, &qp_, port, &mr_listen_fd_) != 0) {
+    if (rai_cm_listen_qp(&qp_, port, &mr_listen_fd_) != 0) {
         LOG_ERR("rdma listen failed: rai_cm_listen_qp failed");
         return -1;
     }
@@ -197,7 +194,6 @@ int RdmaTransport::accept() {
 
 void RdmaTransport::close() {
     rai_qp_destroy(&qp_);
-    rai_ctx_destroy(&ctx_);
     if (mr_listen_fd_ >= 0) {
         ::close(mr_listen_fd_);
         mr_listen_fd_ = -1;
