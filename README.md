@@ -17,7 +17,7 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing 
 - [x] **Drop the raw verbs path, keep only rdma_cm**
   - **Why**: production target is Alibaba Cloud eRDMA (iWARP), which rejects manual `ibv_modify_qp INIT/RTR/RTS` transitions and requires rdma_cm. The raw verbs path was an early-stage learning artifact, not used in any current benchmark.
   - **Done**: Deleted `rai_ctx_init / rai_qp_create / rai_qp_init / rai_qp_connect` (~200 LOC removed); simplified `rai_ctx_t` (dropped `port` / `gid_index` fields). The OOB TCP helpers (`rai_oob_listen / accept / connect`) remain because they're now used by `rai_cm_listen_qp` to set up the MR-exchange channel on `port+1`.
-- [ ] **Write `docs/raw-verbs-evolution.md`** retrospective covering the manual QP state machine, OOB TCP handshake, bugs we hit (PSN sync, GID selection, RNR retry on SoftRoCE, eRDMA rejecting manual transitions), and why we moved to rdma_cm. Tag a commit on the pre-cleanup snapshot for reference.
+- [x] **Wrote [`docs/raw-verbs-evolution.md`](docs/raw-verbs-evolution.md)** retrospective covering the manual QP state machine, OOB TCP handshake, the four bugs we hit (GID selection, PSN sync, RNR retry on SoftRoCE, eRDMA rejecting manual `ibv_modify_qp`), and why we moved to rdma_cm.
 - [x] **Re-measure Phase 3 on Alibaba eRDMA** — Done. RDMA + TCP measured at 5 sizes (4 KB → 10 MB). Found and fixed a 1080× perf bug along the way: `ring_allreduce` was re-registering 3 MRs per call; refactored to NCCL-style explicit pre-registration. RDMA wins at every size (1.2–2.4× faster than TCP).
 - [ ] **Re-measure Phase 4 on Alibaba eRDMA** — current Phase 4 numbers are from Azure MANA RoCE (prefill) and SoftRoCE loopback (decode), historical before the eRDMA commitment.
 - [x] **Fold `rai_ctx_t` into `rai_qp_t` and delete `rdma_context.c`** — Done. Moved PD/CQ into `rai_qp_t`, deleted `rai_ctx_t` and `rdma_context.c`, simplified all APIs from `(ctx, qp)` to `(qp)` (`rai_mr_reg`, `rai_poll_cq`, `rai_cm_server/client/listen_qp/connect_qp`). Updated ~70 call sites across phase1 verbs/benchmarks and phase2 backend.
@@ -125,14 +125,6 @@ Compares RDMA backend (rdma_cm + libibverbs) against TCP backend across send/rec
 - **The fix that made all this work**: `ring_allreduce` initially registered 3 MRs per call (`ScopedBuffer` inside the function). On eRDMA, `ibv_reg_mr` is ~10 ms, so each iteration spent ~30 ms in registration alone — RDMA was 540× slower than TCP. Refactored to NCCL-style: caller pre-registers MRs once before the timed loop and passes `BufferHandle*` into `ring_allreduce`. Hot-path cost dropped from ~30 ms to ~50 μs (1080× speedup).
 
 > Production lesson: RDMA's user-space polling model is sensitive to OS scheduling jitter. NCCL/UCX deployments isolate CPU cores (`isolcpus`, cgroup pinning) or run on bare metal to avoid this. On shared cloud VMs the jitter is fundamental.
-
-#### Historical baseline (Azure VM, TCP loopback)
-
-| Benchmark | Min | Median | p99 |
-|---|---|---|---|
-| `ring_allreduce` TCP, N=2, 4 KB | 45 μs | 95 μs | 121 μs |
-
-> Loopback over a single Azure VM, before the project committed to Alibaba eRDMA hardware. Kept for reference.
 
 ### Phase 4 — Remote KV Cache (slot_size=4096B)
 
