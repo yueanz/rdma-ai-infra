@@ -81,7 +81,30 @@ int main(int argc, char *argv[]){
         buf[i] = cfg.rank + 1;
     }
 
-    if (ring_allreduce(&w, buf.data(), cfg.count) != 0) {
+    size_t chunk = cfg.count / w.size;
+    size_t chunk_bytes = chunk * sizeof(float);
+
+    // staging buffer for reduce-scatter receives
+    std::vector<float> stage(chunk);
+
+    // register buffers
+    ScopedBuffer r_buf_h;
+    if (r_buf_h.init(w.right.get(), buf.data(), cfg.count * sizeof(float)) != 0) {
+        LOG_ERR("ring_allreduce failed: sb init failed");
+        return -1;
+    }
+    ScopedBuffer l_buf_h;
+    if (l_buf_h.init(w.left.get(), buf.data(), cfg.count * sizeof(float)) != 0) {
+        LOG_ERR("ring_allreduce failed: sb init failed");
+        return -1;
+    }
+    ScopedBuffer stage_h;
+    if (stage_h.init(w.left.get(), stage.data(), chunk_bytes) != 0) {
+        LOG_ERR("ring_allreduce failed: sb init failed");
+        return -1;
+    }
+
+    if (ring_allreduce(&w, &r_buf_h.h, &l_buf_h.h, &stage_h.h, buf.data(), stage.data(), cfg.count) != 0) {
         LOG_ERR("ring_allreduce failed");
         return -1;
     }
@@ -105,7 +128,7 @@ int main(int argc, char *argv[]){
         for (size_t i = 0; i < buf.size(); i++)
             buf[i] = cfg.rank + 1;
         iter_start = time_now_ns();
-        if (ring_allreduce(&w, buf.data(), cfg.count) != 0) {
+        if (ring_allreduce(&w, &r_buf_h.h, &l_buf_h.h, &stage_h.h, buf.data(), stage.data(), cfg.count) != 0) {
             LOG_ERR("ring_allreduce failed");
             return -1;
         }

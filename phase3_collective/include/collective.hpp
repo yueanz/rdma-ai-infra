@@ -28,8 +28,15 @@ int world_init(World *w, int rank, int size,
                bool use_rdma);
 
 /*
-* Ring all-reduce: float32 sum
-* buf: input/output buffer (in-place)
-* count: number of float32 elements
-*/
-int ring_allreduce(World *w, float *buf, size_t count);
+ * Ring all-reduce: float32 sum, in-place.
+ * Caller pre-registers MRs once and reuses them across calls
+ * (ibv_reg_mr is ~10ms; doing it in the hot loop kills throughput).
+ *
+ *   r_h         — buf registered on world.right
+ *   l_h         — buf registered on world.left
+ *   stage_h     — stage registered on world.left
+ *   buf, count  — input/output array
+ *   stage       — staging buffer of count/world.size floats
+ */
+int ring_allreduce(World *w, BufferHandle *r_h, BufferHandle *l_h, BufferHandle *stage_h,
+                    float *buf, float *stage, size_t count);

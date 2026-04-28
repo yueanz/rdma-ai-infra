@@ -1,35 +1,15 @@
 #include "collective.hpp"
 #include <vector>
 
-int ring_allreduce(World *w, float *buf, size_t count) {
+int ring_allreduce(World *w, BufferHandle *r_h, BufferHandle *l_h, BufferHandle *stage_h,
+                    float *buf, float *stage, size_t count) {
     int N = w->size;
     int rank = w->rank;
-
-    if (count % N != 0) {
-        LOG_ERR("ring_allreduce: count %zu not divisible by world size %d", count, N);
-        return -1;
-    }
-
     size_t chunk = count / N;
     size_t chunk_bytes = chunk * sizeof(float);
 
-    // staging buffer for reduce-scatter receives
-    std::vector<float> stage(chunk);
-
-    // register buffers
-    ScopedBuffer r_buf_h;
-    if (r_buf_h.init(w->right.get(), buf, count * sizeof(float)) != 0) {
-        LOG_ERR("ring_allreduce failed: sb init failed");
-        return -1;
-    }
-    ScopedBuffer l_buf_h;
-    if (l_buf_h.init(w->left.get(), buf, count * sizeof(float)) != 0) {
-        LOG_ERR("ring_allreduce failed: sb init failed");
-        return -1;
-    }
-    ScopedBuffer stage_h;
-    if (stage_h.init(w->left.get(), stage.data(), chunk_bytes) != 0) {
-        LOG_ERR("ring_allreduce failed: sb init failed");
+    if (count % N != 0) {
+        LOG_ERR("ring_allreduce: count %zu not divisible by world size %d", count, N);
         return -1;
     }
 
@@ -40,20 +20,20 @@ int ring_allreduce(World *w, float *buf, size_t count) {
 
         /* parity stagger: even ranks send first to avoid deadlock with blocking TCP recv */
         if (rank % 2 == 0) {
-            if (w->right->send_async(&r_buf_h.h, chunk_bytes, r, send_idx*chunk_bytes) != 0) {
+            if (w->right->send_async(r_h, chunk_bytes, r, send_idx*chunk_bytes) != 0) {
                 LOG_ERR("ring_allreduce failed: send_async failed");
                 return -1;
             }
-            if (w->left->recv_async(&stage_h.h, chunk_bytes, r, 0) != 0) {
+            if (w->left->recv_async(stage_h, chunk_bytes, r, 0) != 0) {
                 LOG_ERR("ring_allreduce failed: recv_async failed");
                 return -1;
             }
         } else {
-            if (w->left->recv_async(&stage_h.h, chunk_bytes, r, 0) != 0) {
+            if (w->left->recv_async(stage_h, chunk_bytes, r, 0) != 0) {
                 LOG_ERR("ring_allreduce failed: recv_async failed");
                 return -1;
             }
-            if (w->right->send_async(&r_buf_h.h, chunk_bytes, r, send_idx*chunk_bytes) != 0) {
+            if (w->right->send_async(r_h, chunk_bytes, r, send_idx*chunk_bytes) != 0) {
                 LOG_ERR("ring_allreduce failed: send_async failed");
                 return -1;
             }
@@ -82,20 +62,20 @@ int ring_allreduce(World *w, float *buf, size_t count) {
         
         /* same parity stagger as reduce-scatter */
         if (rank % 2 == 0) {
-            if (w->right->send_async(&r_buf_h.h, chunk_bytes, r, send_idx*chunk_bytes) != 0) {
+            if (w->right->send_async(r_h, chunk_bytes, r, send_idx*chunk_bytes) != 0) {
                 LOG_ERR("ring_allreduce failed: send_async failed");
                 return -1;
             }
-            if (w->left->recv_async(&l_buf_h.h, chunk_bytes, r, recv_idx*chunk_bytes) != 0) {
+            if (w->left->recv_async(l_h, chunk_bytes, r, recv_idx*chunk_bytes) != 0) {
                 LOG_ERR("ring_allreduce failed: recv_async failed");
                 return -1;
             }
         } else {
-            if (w->left->recv_async(&l_buf_h.h, chunk_bytes, r, recv_idx*chunk_bytes) != 0) {
+            if (w->left->recv_async(l_h, chunk_bytes, r, recv_idx*chunk_bytes) != 0) {
                 LOG_ERR("ring_allreduce failed: recv_async failed");
                 return -1;
             }
-            if (w->right->send_async(&r_buf_h.h, chunk_bytes, r, send_idx*chunk_bytes) != 0) {
+            if (w->right->send_async(r_h, chunk_bytes, r, send_idx*chunk_bytes) != 0) {
                 LOG_ERR("ring_allreduce failed: send_async failed");
                 return -1;
             }
