@@ -40,15 +40,16 @@ int world_init(World *w, int rank, int size,
         }
     });
 
-    /* retry connect — peer may not have reached listen() yet */
+    /* retry connect — peer may not have reached listen() yet.
+     * 60s window to accommodate manual launch across two terminals. */
     int rank_right = (rank + 1) % size;
     int connect_ret = -1;
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 600; i++) {
         if (w->right->connect(host_list[rank_right], base_port+rank_right) == 0) {
             connect_ret = 0;
             break;
         }
-        usleep(10000);  /* 10ms between retries */
+        usleep(100000);  /* 100ms between retries */
     }
 
     if (connect_ret != 0)
