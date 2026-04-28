@@ -120,14 +120,17 @@ int main(int argc, char *argv[]) {
     try {
         std::unique_ptr<Transport> ctrl(create_tcp_transport());
 
-        if (ctrl->listen(cfg.port+1) != 0) {
+        /* Port layout: ctrl on `port`, data on `port+2`.
+         * RDMA listen also opens an OOB TCP socket on (data_port + 1) for
+         * the MR addr/rkey exchange — leave room with a +2 gap. */
+        if (ctrl->listen(cfg.port) != 0) {
             LOG_ERR("listen failed");
             return 1;
         }
 
         std::unique_ptr<Transport> data(create_rdma_transport());
 
-        if (data->listen(cfg.port) != 0) {
+        if (data->listen(cfg.port + 2) != 0) {
             LOG_ERR("listen failed");
             return 1;
         }

@@ -149,14 +149,15 @@ int main(int argc, char *argv[]) {
     try {
         std::unique_ptr<Transport> ctrl(create_tcp_transport());
 
-        if (ctrl->connect(cfg.server_ip.c_str(), cfg.port+1) != 0) {
+        /* Match kv_server's port layout: ctrl on port, data on port+2 */
+        if (ctrl->connect(cfg.server_ip.c_str(), cfg.port) != 0) {
             LOG_ERR("connect failed");
             return 1;
         }
 
         std::unique_ptr<Transport> data(create_rdma_transport());
 
-        if (data->connect(cfg.server_ip.c_str(), cfg.port) != 0) {
+        if (data->connect(cfg.server_ip.c_str(), cfg.port + 2) != 0) {
             LOG_ERR("connect failed");
             return 1;
         }
