@@ -8,7 +8,7 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing 
 
 - [x] **Phase 1** — RDMA Verbs Foundation (RC QP, MR, CQ, send/recv, RDMA write, benchmarks; rdma_cm connection for iWARP/RoCE portability)
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends via rdma_cm, send/recv + write benchmarks; TCP write omitted — no one-sided primitive)
-- [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, TCP backend)
+- [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, RDMA + TCP backends benchmarked on eRDMA two-machine setup)
 - [x] **Phase 4** — Remote KV Cache (slab allocator over single MR, ctrl/data plane separation, prefill via RDMA write, decode via RDMA read)
 - [ ] **Phase 5** — vLLM KVTransferAgent Integration (pybind11 binding for Transport layer, `RdmaKVConnector` implementing `KVConnectorBase_V1`, CPU tensor path validated end-to-end, GPUDirect designed for future hardware)
 
@@ -18,7 +18,7 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing 
   - **Why**: production target is Alibaba Cloud eRDMA (iWARP), which rejects manual `ibv_modify_qp INIT/RTR/RTS` transitions and requires rdma_cm. The raw verbs path was an early-stage learning artifact, not used in any current benchmark.
   - **Done**: Deleted `rai_ctx_init / rai_qp_create / rai_qp_init / rai_qp_connect` (~200 LOC removed); simplified `rai_ctx_t` (dropped `port` / `gid_index` fields). The OOB TCP helpers (`rai_oob_listen / accept / connect`) remain because they're now used by `rai_cm_listen_qp` to set up the MR-exchange channel on `port+1`.
 - [ ] **Write `docs/raw-verbs-evolution.md`** retrospective covering the manual QP state machine, OOB TCP handshake, bugs we hit (PSN sync, GID selection, RNR retry on SoftRoCE, eRDMA rejecting manual transitions), and why we moved to rdma_cm. Tag a commit on the pre-cleanup snapshot for reference.
-- [ ] **Re-measure Phase 3 on Alibaba eRDMA** — current Phase 3 number is TCP loopback on Azure VM (historical). Run `allreduce_bench` with both TCP and RDMA backends on the eRDMA two-machine setup.
+- [x] **Re-measure Phase 3 on Alibaba eRDMA** — Done. RDMA + TCP measured at 5 sizes (4 KB → 10 MB). Found and fixed a 1080× perf bug along the way: `ring_allreduce` was re-registering 3 MRs per call; refactored to NCCL-style explicit pre-registration. RDMA wins at every size (1.2–2.4× faster than TCP).
 - [ ] **Re-measure Phase 4 on Alibaba eRDMA** — current Phase 4 numbers are from Azure MANA RoCE (prefill) and SoftRoCE loopback (decode), historical before the eRDMA commitment.
 - [x] **Fold `rai_ctx_t` into `rai_qp_t` and delete `rdma_context.c`** — Done. Moved PD/CQ into `rai_qp_t`, deleted `rai_ctx_t` and `rdma_context.c`, simplified all APIs from `(ctx, qp)` to `(qp)` (`rai_mr_reg`, `rai_poll_cq`, `rai_cm_server/client/listen_qp/connect_qp`). Updated ~70 call sites across phase1 verbs/benchmarks and phase2 backend.
 
@@ -105,13 +105,34 @@ Compares RDMA backend (rdma_cm + libibverbs) against TCP backend across send/rec
 - **At 1MB (large)**: TCP send/recv (37.84 Gbps) **outperforms** all RDMA modes (~25 Gbps). Reason: Alibaba eRDMA fabric applies QoS shaping to RDMA traffic at ~25–28 Gbps sustained (matches Phase 1 `bw_rdma_write` 28 Gbps sustained), while TCP traffic is shaped on a different policy.
 - **Practical takeaway for LLM inference (KV cache transfer)**: chunk transfers to ≤64KB, use RDMA write — avoids both the cloud QoS shaping and the RNR jitter on send/recv. Phase 4's `KVPool` design is built on this principle.
 
-### Phase 3 — Ring All-Reduce (Azure VM, TCP backend, loopback)
+### Phase 3 — Ring All-Reduce (Alibaba Cloud ECS, eRDMA, two machines)
+
+`ring_allreduce` measured at 5 sizes spanning 4 orders of magnitude. RDMA wins at every size, but the gap narrows as the message gets large.
+
+| count (floats) | bytes | RDMA median | TCP median | RDMA speedup |
+|---|---|---|---|---|
+| 1,024 | 4 KB | 38 μs | 75 μs | 1.97× |
+| 4,096 | 16 KB | 42 μs | 80 μs | 1.91× |
+| 65,536 | 256 KB | 106 μs | 254 μs | 2.40× |
+| 262,144 | 1 MB | 313 μs | 510 μs | 1.63× |
+| 2,621,440 | 10 MB | 2,833 μs | 3,466 μs | 1.22× |
+
+**Key insights:**
+
+- **RDMA wins at every size** — kernel-bypass advantage is largest at small messages (~2× faster), shrinks as bandwidth becomes the bottleneck (~1.2× at 10 MB).
+- **No TCP crossover** like Phase 2 backend_compare 1MB showed. Reason: ring all-reduce splits the buffer into `count/N` chunks (5 MB at N=2 for 10 MB total), so the per-chunk size stays in eRDMA's QoS-friendly range. Single-stream RDMA never sees the full message.
+- **RDMA p99 has bimodal jitter**: most runs are clean (p99 ≈ median), but ~1 iter per 100 hits a 40–90 ms outlier. **Not RNR retry** — `min_rnr_timer = 31` would mean 491 ms per retry, the timing doesn't fit. **Root cause is shared-VM CPU scheduling jitter**: RDMA send/recv uses user-space CQ polling, so when the hypervisor preempts the vCPU for tens of ms, the polling loop stalls. TCP send/recv uses kernel-blocking sockets and is less affected.
+- **The fix that made all this work**: `ring_allreduce` initially registered 3 MRs per call (`ScopedBuffer` inside the function). On eRDMA, `ibv_reg_mr` is ~10 ms, so each iteration spent ~30 ms in registration alone — RDMA was 540× slower than TCP. Refactored to NCCL-style: caller pre-registers MRs once before the timed loop and passes `BufferHandle*` into `ring_allreduce`. Hot-path cost dropped from ~30 ms to ~50 μs (1080× speedup).
+
+> Production lesson: RDMA's user-space polling model is sensitive to OS scheduling jitter. NCCL/UCX deployments isolate CPU cores (`isolcpus`, cgroup pinning) or run on bare metal to avoid this. On shared cloud VMs the jitter is fundamental.
+
+#### Historical baseline (Azure VM, TCP loopback)
 
 | Benchmark | Min | Median | p99 |
 |---|---|---|---|
-| `ring_allreduce` TCP, N=2, 1024 floats (4KB) | 45 μs | 95 μs | 121 μs |
+| `ring_allreduce` TCP, N=2, 4 KB | 45 μs | 95 μs | 121 μs |
 
-> TCP loopback baseline measured on Azure VM (historical, before committing to Alibaba Cloud eRDMA). RDMA backend benchmark pending eRDMA two-machine run.
+> Loopback over a single Azure VM, before the project committed to Alibaba eRDMA hardware. Kept for reference.
 
 ### Phase 4 — Remote KV Cache (slot_size=4096B)
 
