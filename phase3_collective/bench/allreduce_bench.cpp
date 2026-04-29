@@ -31,6 +31,11 @@ static int config_parse(int argc, char *argv[], Config *cfg) {
     cfg->world = atoi(argv[2]);
     cfg->base_port = atoi(argv[3]);
 
+    if (cfg->world <= 0 || cfg->rank < 0 || cfg->rank >= cfg->world) {
+        fprintf(stderr, "world must be > 0 and 0 <= rank < world\n");
+        return -1;
+    }
+
     for (int i = 0; i < cfg->world; i++) {
         if (4 + i >= argc) {
             config_usage(argv[0]);
@@ -54,6 +59,11 @@ static int config_parse(int argc, char *argv[], Config *cfg) {
         } else if (strcmp(argv[i], "--rdma") == 0) {
             cfg->is_rdma = true;
         }
+    }
+    if (cfg->count <= 0 || cfg->count % cfg->world != 0) {
+        fprintf(stderr, "count must be > 0 and divisible by world (got count=%d world=%d)\n",
+                cfg->count, cfg->world);
+        return -1;
     }
     return 0;
 }

@@ -139,7 +139,7 @@ int TcpTransport::poll(uint64_t *completed_id) {
 }
 
 int TcpTransport::connect(const char *host, int port) {
-    struct sockaddr_in addr = {0};
+    struct sockaddr_in addr = {};
 
     if (host == nullptr) {
         LOG_ERR("tcp connect failed: host is null");
@@ -171,7 +171,7 @@ int TcpTransport::connect(const char *host, int port) {
 
 int TcpTransport::listen(int port) {
     int opt = 1;
-    struct sockaddr_in addr = {0};
+    struct sockaddr_in addr = {};
 
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);

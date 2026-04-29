@@ -12,6 +12,10 @@
  * for n=100 (the 99th value out of 100), not samples[99] (which would
  * always equal max). */
 static inline void print_latency(const char *label, uint64_t *samples, int n) {
+    if (n <= 0) {
+        printf("\n--- %s --- (no samples)\n", label);
+        return;
+    }
     int idx_median = (n - 1) / 2;
     int idx_p99    = (int)((n - 1) * 0.99);
     printf("\n--- %s ---\n", label);
@@ -27,6 +31,10 @@ static inline void print_latency(const char *label, uint64_t *samples, int n) {
 /* Print bandwidth results. */
 static inline void print_bandwidth(const char *label,
                                    uint64_t total_bytes, uint64_t elapsed_ns) {
+    if (elapsed_ns == 0) {
+        printf("\n--- %s --- (no data)\n", label);
+        return;
+    }
     double elapsed_ms = elapsed_ns / 1e6;
     double gbps       = (double)total_bytes * 8 / (elapsed_ns / 1e9) / 1e9;
     double GBps       = (double)total_bytes / (elapsed_ns / 1e9) / (1024.0 * 1024 * 1024);

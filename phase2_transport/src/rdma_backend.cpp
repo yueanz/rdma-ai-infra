@@ -1,5 +1,6 @@
 #include "rdma_backend.hpp"
 #include <cstdlib>
+#include <cstring>
 #include <unistd.h>
 
 RdmaTransport::RdmaTransport() {
@@ -146,6 +147,13 @@ int RdmaTransport::connect(const char *host, int port) {
 
     if (qp_.qp != nullptr) {
         rai_qp_destroy(&qp_);
+    }
+
+    /* Defensive: if this instance was previously used as a listener,
+     * its OOB mr_listen_fd_ will still be open. */
+    if (mr_listen_fd_ >= 0) {
+        ::close(mr_listen_fd_);
+        mr_listen_fd_ = -1;
     }
 
     if (rai_cm_connect_qp(&qp_, host, port) != 0) {

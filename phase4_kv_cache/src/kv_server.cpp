@@ -25,6 +25,10 @@ static int config_parse(int argc, char *argv[], Config *cfg) {
     cfg->port = atoi(argv[i++]);
     cfg->num_slots = atoi(argv[i++]);
     cfg->slot_size = atoi(argv[i++]);
+    if (cfg->num_slots <= 0 || cfg->slot_size == 0) {
+        fprintf(stderr, "num_slots and slot_size must be > 0\n");
+        return -1;
+    }
     return 0;
 }
 
@@ -56,14 +60,24 @@ static int handshake_meta(KVPool &pool, Transport *ctrl, ScopedBuffer &ctrl_sb) 
     return 0;
 }
 
+/* Wire format for client→server requests is fixed-size: every request is
+ * sizeof(ctrl_buf.msg) bytes (msg[0] = type, msg[1] = payload, unused for
+ * ALLOC). Single fixed size keeps the dispatcher backend-agnostic — RDMA
+ * send/recv requires send/recv WR sizes to match exactly, so the original
+ * "peek 4 bytes, then recv 4 more for FREE" pattern was relying on TCP's
+ * byte-stream semantics and would have broken on RDMA. */
 static int serve(KVPool &pool, Transport *ctrl, ScopedBuffer &ctrl_sb) {
     CtrlBuf &ctrl_buf = *static_cast<CtrlBuf*>(ctrl_sb.h.addr);
 
     while (1) {
-        if (ctrl->recv_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0 ||
+        /* Failure on the first recv of a request is treated as a clean
+         * client disconnect (kv_bench finished, closed the ctrl socket).
+         * Mid-message recvs / sends below still return -1 — those are
+         * real protocol errors. */
+        if (ctrl->recv_async(&ctrl_sb.h, sizeof(ctrl_buf.msg), 0, 0) != 0 ||
             ctrl->poll(nullptr) != 0) {
-            LOG_ERR("serve: recv msg failed");
-            return -1;
+            LOG_INFO("client disconnected, exiting");
+            return 0;
         }
 
         int msg = ctrl_buf.msg[0];
@@ -80,11 +94,6 @@ static int serve(KVPool &pool, Transport *ctrl, ScopedBuffer &ctrl_sb) {
                 return -1;
             }
         } else if (msg == KV_MSG_FREE) {
-            if (ctrl->recv_async(&ctrl_sb.h, sizeof(int), 0, sizeof(int)) != 0 ||
-                ctrl->poll(nullptr) != 0) {
-                LOG_ERR("serve: recv FREE slot_idx failed");
-                return -1;
-            }
             int slot_idx = ctrl_buf.msg[1];
             if (slot_idx < 0 || slot_idx >= pool.num_slots) {
                 LOG_ERR("slot_idx invalid");
@@ -112,10 +121,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    KVPool pool = {
-        .slot_size = cfg.slot_size,
-        .num_slots = cfg.num_slots
-    };
+    KVPool pool{};
+    pool.slot_size = cfg.slot_size;
+    pool.num_slots = cfg.num_slots;
 
     try {
         std::unique_ptr<Transport> ctrl(create_tcp_transport());

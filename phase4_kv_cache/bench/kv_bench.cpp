@@ -66,8 +66,12 @@ static int handshake_meta(KVRemote &remote, Transport *ctrl, ScopedBuffer &ctrl_
 static int kv_alloc(int &slot_idx, Transport *ctrl, ScopedBuffer &ctrl_sb) {
     CtrlBuf &ctrl_buf = *static_cast<CtrlBuf*>(ctrl_sb.h.addr);
 
+    /* Send full ctrl_buf.msg (8 bytes) even though ALLOC has no payload —
+     * keeps the wire format uniform with FREE so the server's recv_async
+     * size matches under both TCP and RDMA. msg[1] is unused. */
     ctrl_buf.msg[0] = KV_MSG_ALLOC;
-    if (ctrl->send_async(&ctrl_sb.h, sizeof(int), 0, 0) != 0 ||
+    ctrl_buf.msg[1] = 0;
+    if (ctrl->send_async(&ctrl_sb.h, sizeof(ctrl_buf.msg), 0, 0) != 0 ||
         ctrl->poll(nullptr) != 0) {
         LOG_ERR("kv_alloc failed: send ALLOC failed");
         return -1;
@@ -217,6 +221,7 @@ int main(int argc, char *argv[]) {
 
         if (kv_free(slot_idx, ctrl.get(), ctrl_sb) != 0) {
             LOG_ERR("kv_free failed");
+            return 1;
         }
 
     } catch (const std::exception &e) {

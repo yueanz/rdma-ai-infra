@@ -1,8 +1,4 @@
-find_package(IBVerbs QUIET)
-if(NOT IBVerbs_FOUND)
-    find_library(IBVERBS_LIB ibverbs)
-    find_path(IBVERBS_INCLUDE infiniband/verbs.h)
-endif()
+# ibverbs is pulled in transitively via rdma_verbs; no need to find it here.
 
 set(COMMON_INC ${CMAKE_SOURCE_DIR}/common/include)
 
