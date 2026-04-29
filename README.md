@@ -2,7 +2,7 @@
 
 A from-scratch implementation of RDMA communication primitives, transport abstractions, and collective operations — targeting the infrastructure layer of distributed AI training and inference systems.
 
-Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing from raw verbs to a mini NCCL-style all-reduce.
+Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), implementing two end-to-end workloads from raw verbs upward: a mini NCCL-style ring all-reduce and a vLLM-style remote KV cache (prefill via RDMA write, decode via RDMA read).
 
 ## Phase Status
 
@@ -44,7 +44,7 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing 
 **Key insights:**
 - RDMA write is ~21% lower latency than send/recv (median: 31 vs 40 μs) — one-sided ops bypass server-side CPU entirely
 - Burst vs sustained throughput gap (78 → 28 Gbps) reflects Alibaba Cloud eRDMA fabric QoS: short transfers run at line rate, sustained transfers are throttled to a committed rate
-- eRDMA throughput scales near-linearly to depth=8, then diminishing returns as depth=16 saturates the NIC (~58 Gbps); depth=32 errors out with `WR_FLUSH_ERR` (likely the QP's `max_send_wr` cap or a fabric-level ceiling)
+- eRDMA throughput scales near-linearly to depth=8, then diminishing returns as depth=16 saturates the NIC (~58 Gbps); depth=32 errors out with `WR_FLUSH_ERR` — a fabric-level ceiling, not the QP's `max_send_wr` (set to 128 in `rdma_cm_connect.c`).
 - SoftRoCE caps out at depth=4 (14 Gbps); depth≥8 triggers UDP buffer overflow — 65KB × 8 in-flight = 128 concurrent UDP packets exceeds the kernel receive buffer; eRDMA at depth=4 (40 Gbps) already outperforms SoftRoCE's ceiling
 
 ### Phase 1 — SoftRoCE (Alibaba Cloud ECS, two machines)
@@ -93,7 +93,7 @@ Compares RDMA backend (rdma_cm + libibverbs) against TCP backend across send/rec
 **Key insights:**
 
 - **At 4KB (small messages)**: RDMA write median 18 µs vs TCP send/recv 30 µs — **RDMA wins on latency** by 40%, and write is even faster than RDMA send/recv (one-sided skips server CPU).
-- **At 64KB (medium)**: RDMA write 22 Gbps vs RDMA send/recv 2 Gbps — **single-byte difference is 11×**. The send/recv throughput collapses because the polling-preempt tail (see footnote on the latency table) drags the average into milliseconds. RDMA write is immune — server CPU is not involved, so no polling loop to preempt.
+- **At 64KB (medium)**: RDMA write 22 Gbps vs RDMA send/recv 2 Gbps — **same payload size, 11× gap from operation choice alone**. The send/recv throughput collapses because the polling-preempt tail (see footnote on the latency table) drags the average into milliseconds. RDMA write is immune — server CPU is not involved, so no polling loop to preempt.
 - **At 1MB (large)**: TCP send/recv (37.84 Gbps) **outperforms** all RDMA modes (~25 Gbps). Reason: Alibaba eRDMA fabric applies QoS shaping to RDMA traffic at ~25–28 Gbps sustained (matches Phase 1 `bw_rdma_write` 28 Gbps sustained), while TCP traffic is shaped on a different policy.
 - **Practical takeaway for LLM inference (KV cache transfer)**: chunk transfers to ≤64KB, use RDMA write — avoids both the cloud QoS shaping and the polling-preempt tail on send/recv. Phase 4's `KVPool` design is built on this principle.
 
@@ -127,7 +127,7 @@ At 4 KB / 16 KB / 10 MB, **p99 ≈ max**, meaning ≥2 consecutive iters land in
 
 **No TCP crossover** like Phase 2 backend_compare 1 MB showed. Ring all-reduce chunks the buffer into `count/N` pieces (5 MB at N=2 for 10 MB total) and the per-WR transfer bursts at NIC line rate; eRDMA's 28 Gbps QoS only shapes *sustained* streams (Phase 1's back-to-back 1,000-iter `bw_rdma_write`), not the gappy 1-iter-at-a-time pattern in ring all-reduce.
 
-**The fix that made all this work**: `ring_allreduce` initially registered 3 MRs per call (`ScopedBuffer` inside the function). On eRDMA, `ibv_reg_mr` is ~10 ms, so each iteration spent ~30 ms in registration alone — RDMA was 540× *slower* than TCP at small sizes. Refactored to NCCL-style: caller pre-registers MRs once before the timed loop and passes `BufferHandle*` into `ring_allreduce`. Per-iter cost dropped from ~30 ms to ~50 μs (~600× per-iter speedup, ~1080× when measured against TCP-as-baseline since post-fix RDMA is also ~2× *faster* than TCP).
+**The fix that made all this work**: `ring_allreduce` initially registered 3 MRs per call (`ScopedBuffer` inside the function). On eRDMA, `ibv_reg_mr` is ~10 ms, so each iteration spent ~30 ms in registration alone. Refactored to NCCL-style: caller pre-registers MRs once before the timed loop and passes `BufferHandle*` into `ring_allreduce`. Per-iter cost dropped from ~30 ms to ~50 μs (**600× faster**). Pre-fix, RDMA was ~540× *slower* than TCP at small sizes; post-fix, RDMA is ~2× *faster* than TCP — the bug effectively flipped the sign of the comparison.
 
 > Production lesson: RDMA's user-space polling model is sensitive to OS scheduling jitter. NCCL/UCX deployments isolate CPU cores (`isolcpus`, cgroup pinning) or run on bare metal to avoid this. On shared cloud VMs the jitter is fundamental — visible only in the tail, but visible.
 
@@ -164,9 +164,9 @@ At 4 KB / 16 KB / 10 MB, **p99 ≈ max**, meaning ≥2 consecutive iters land in
 
 - **`KVPool` abstraction is zero-overhead**: at every size, `kv_bench` matches the raw RDMA numbers from Phase 1/2 within noise. The slab allocator + single pre-registered MR doesn't add a single μs to the data path.
 
-- **RDMA read ≈ RDMA write**: at every size, decode is ~5–10% slower than prefill. RDMA read needs one extra NIC round-trip (fetch vs push); the small gap is expected. Both throughputs match in the bandwidth-bound regime because they're bottlenecked by the same fabric.
+- **RDMA read ≈ RDMA write**: decode is 0–14% slower than prefill, with the gap largest at small sizes (where one extra fetch round-trip is a meaningful fraction of total time) and shrinking to near-zero at 1 MB (bandwidth-bound, both sides hit the same fabric ceiling).
 
-- **Clean tail at small sizes** (p99 ≤ 30 μs at ≤64 KB): unlike Phase 2/3 where `send/recv` showed 40–90 ms outliers from cloud-VM scheduling, Phase 4's one-sided write/read **doesn't involve the server's CPU** at all — server is just a passive doorbell target. Max occasionally spikes (e.g. 64 KB decode hit 208 μs from a single iter), but the spikes stay isolated and never cluster — p99 is the reliable description. **p99 jitter only ramps up at ≥256 KB** (p99 ~150 μs, max 1–5 ms) where transfers take long enough for cloud-fabric variance to show.
+- **Clean tail at small sizes** (p99 ≤ 30 μs at ≤64 KB): unlike Phase 2/3 where `send/recv` showed 40–90 ms outliers from cloud-VM scheduling, Phase 4's one-sided write/read **doesn't involve the server's CPU** at all — server is just a passive doorbell target. Max occasionally spikes (e.g. 64 KB decode hit 208 μs from a single iter), but the spikes stay isolated and never cluster — p99 is the reliable description. **p99 jitter ramps up at ≥256 KB** (p99 ~150 μs at 256 KB, ~430 μs at 1 MB; max 1–5 ms across both) where transfers take long enough for cloud-fabric variance to show.
 
 > **vLLM block size context**: a typical vLLM KV block (16 tokens × Llama-7B FP16) is ~256 KB; for larger models or block sizes it can hit 1 MB+. Phase 4's 256 KB result (31 μs median, 41 Gbps) is the sweet spot — small enough to dodge the QoS shaping, large enough to amortize per-op overhead. The decode path uses RDMA read so the consumer can pull blocks from the producer without the producer's CPU involvement, matching vLLM's disaggregated prefill/decode topology.
 
@@ -187,7 +187,7 @@ rdma-ai-infra/
 │   ├── src/
 │   │   ├── rdma_qp.c                # rai_qp_destroy (idempotent teardown)
 │   │   ├── rdma_mr.c                # MR register / deregister
-│   │   ├── rdma_ops.c               # post_send / post_recv / post_write / poll_cq
+│   │   ├── rdma_ops.c               # post_send / post_recv / post_write / post_read / poll_cq
 │   │   ├── rdma_cm_connect.c        # rdma_cm-based connect (server/client/listen/accept)
 │   │   └── rdma_connect.c           # rai_oob_listen / accept / connect (TCP for MR exchange)
 │   └── bench/
