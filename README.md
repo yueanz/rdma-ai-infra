@@ -18,7 +18,7 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing 
   - **Why**: production target is Alibaba Cloud eRDMA (iWARP), which rejects manual `ibv_modify_qp INIT/RTR/RTS` transitions and requires rdma_cm. The raw verbs path was an early-stage learning artifact, not used in any current benchmark.
   - **Done**: Deleted `rai_ctx_init / rai_qp_create / rai_qp_init / rai_qp_connect` (~200 LOC removed); simplified `rai_ctx_t` (dropped `port` / `gid_index` fields). The OOB TCP helpers (`rai_oob_listen / accept / connect`) remain because they're now used by `rai_cm_listen_qp` to set up the MR-exchange channel on `port+1`.
 - [x] **Wrote [`docs/raw-verbs-evolution.md`](docs/raw-verbs-evolution.md)** retrospective covering the manual QP state machine, OOB TCP handshake, the four bugs we hit (GID selection, PSN sync, RNR retry on SoftRoCE, eRDMA rejecting manual `ibv_modify_qp`), and why we moved to rdma_cm.
-- [x] **Re-measure Phase 3 on Alibaba eRDMA** — Done. RDMA + TCP measured at 5 sizes (4 KB → 10 MB). Found and fixed a 1080× perf bug along the way: `ring_allreduce` was re-registering 3 MRs per call; refactored to NCCL-style explicit pre-registration. RDMA wins at every size (1.2–2.4× faster than TCP).
+- [x] **Re-measure Phase 3 on Alibaba eRDMA** — Done. RDMA + TCP measured at 5 sizes (4 KB → 10 MB). Found and fixed a 1080× perf bug along the way: `ring_allreduce` was re-registering 3 MRs per call; refactored to NCCL-style explicit pre-registration. RDMA wins at every size on median (1.2–2.1× faster than TCP).
 - [x] **Re-measure Phase 4 on Alibaba eRDMA** — Done. Full size sweep (4 KB / 16 KB / 64 KB / 256 KB / 1 MB) for both prefill (RDMA write) and decode (RDMA read). Three-regime curve: latency-bound at small sizes, bandwidth-bound peak ~41 Gbps at 256 KB, QoS-shaped to 28 Gbps at 1 MB (matches Phase 1/2 sustained rate). `KVPool` abstraction confirmed zero-overhead vs raw RDMA. No tail jitter at ≤64 KB (max 35–50 μs) — one-sided ops bypass server CPU entirely.
 - [x] **Fold `rai_ctx_t` into `rai_qp_t` and delete `rdma_context.c`** — Done. Moved PD/CQ into `rai_qp_t`, deleted `rai_ctx_t` and `rdma_context.c`, simplified all APIs from `(ctx, qp)` to `(qp)` (`rai_mr_reg`, `rai_poll_cq`, `rai_cm_server/client/listen_qp/connect_qp`). Updated ~70 call sites across phase1 verbs/benchmarks and phase2 backend.
 
@@ -107,24 +107,34 @@ Compares RDMA backend (rdma_cm + libibverbs) against TCP backend across send/rec
 
 ### Phase 3 — Ring All-Reduce (Alibaba Cloud ECS, eRDMA, two machines)
 
-`ring_allreduce` measured at 5 sizes spanning 4 orders of magnitude. RDMA wins at every size, but the gap narrows as the message gets large.
+`ring_allreduce` measured at 5 sizes spanning 4 orders of magnitude. RDMA wins on median at every size; the tail tells a more interesting story.
 
-| count (floats) | bytes | RDMA median | TCP median | RDMA speedup |
-|---|---|---|---|---|
-| 1,024 | 4 KB | 38 μs | 75 μs | 1.97× |
-| 4,096 | 16 KB | 42 μs | 80 μs | 1.91× |
-| 65,536 | 256 KB | 106 μs | 254 μs | 2.40× |
-| 262,144 | 1 MB | 313 μs | 510 μs | 1.63× |
-| 2,621,440 | 10 MB | 2,833 μs | 3,466 μs | 1.22× |
+| count (floats) | bytes | RDMA median | RDMA p99 | TCP median | TCP p99 | Speedup (median) |
+|---|---|---|---|---|---|---|
+| 1,024 | 4 KB | 37 μs | 74.8 ms † | 66 μs | 75 μs | 1.79× |
+| 4,096 | 16 KB | 43 μs | 80.0 ms † | 73 μs | 81 μs | 1.71× |
+| 65,536 | 256 KB | 126 μs | 185 μs | 267 μs | 291 μs | **2.12×** |
+| 262,144 | 1 MB | 336 μs | 833 μs ‡ | 408 μs | 425 μs | 1.22× |
+| 2,621,440 | 10 MB | 2,796 μs | 48.2 ms † | 3,369 μs | 3,497 μs | 1.20× |
 
-**Key insights:**
+† RDMA p99 ≈ max → cluster of 2–3 consecutive bad iters in the tail (cloud-VM scheduling pause).
+‡ RDMA p99 healthy, but max=43 ms — single isolated outlier sampled.
 
-- **RDMA wins at every size** — kernel-bypass advantage is largest at small messages (~2× faster), shrinks as bandwidth becomes the bottleneck (~1.2× at 10 MB).
-- **No TCP crossover** like Phase 2 backend_compare 1MB showed. Reason: ring all-reduce splits the buffer into `count/N` chunks (5 MB at N=2 for 10 MB total), so the per-chunk size stays in eRDMA's QoS-friendly range. Single-stream RDMA never sees the full message.
-- **RDMA p99 has bimodal jitter**: most runs are clean (p99 ≈ median), but ~1 iter per 100 hits a 40–90 ms outlier. **Not RNR retry** — `min_rnr_timer = 31` would mean 491 ms per retry, the timing doesn't fit. **Root cause is shared-VM CPU scheduling jitter**: RDMA send/recv uses user-space CQ polling, so when the hypervisor preempts the vCPU for tens of ms, the polling loop stalls. TCP send/recv uses kernel-blocking sockets and is less affected.
-- **The fix that made all this work**: `ring_allreduce` initially registered 3 MRs per call (`ScopedBuffer` inside the function). On eRDMA, `ibv_reg_mr` is ~10 ms, so each iteration spent ~30 ms in registration alone — RDMA was 540× slower than TCP. Refactored to NCCL-style: caller pre-registers MRs once before the timed loop and passes `BufferHandle*` into `ring_allreduce`. Hot-path cost dropped from ~30 ms to ~50 μs (1080× speedup).
+**Three-regime pattern emerges:**
 
-> Production lesson: RDMA's user-space polling model is sensitive to OS scheduling jitter. NCCL/UCX deployments isolate CPU cores (`isolcpus`, cgroup pinning) or run on bare metal to avoid this. On shared cloud VMs the jitter is fundamental.
+- **Small messages (4–16 KB)**: RDMA's median advantage is largest (~1.75×) — kernel-bypass saves the per-iter syscall cost. But the tail is fully dominated by jitter: per-iter work (~40 μs) is so small that any hypervisor preempt (tens of ms) ends up sitting on top of it.
+- **Sweet spot (256 KB)**: both backends' tails are clean. Per-iter work (~125 μs) is large enough to amortize over the polling loop, but still under eRDMA's bandwidth cap. RDMA gets its biggest relative edge here (2.12×).
+- **Bandwidth-bound (1–10 MB)**: RDMA's median edge collapses to ~1.2× — eRDMA's QoS shapes RDMA traffic to ~28 Gbps sustained (matches Phase 1's `bw_rdma_write` ceiling), and TCP runs near line speed too. Jitter clusters reappear at 10 MB.
+
+**On the jitter — not what I first thought:**
+
+Earlier writeup called this "bimodal: 1 iter per 100 outlier." After fixing a p99 indexing bug (`samples[(int)(n*0.99)]` was returning `samples[max_idx]` for n=100; corrected to `(int)((n-1)*0.99)`), the actual pattern is sharper: at 4 KB / 16 KB / 10 MB, **p99 ≈ max**, meaning ≥2 consecutive iters land in the tail — a single hypervisor preempt event taking out a small cluster. At 256 KB / 1 MB the tail is mostly single outliers. **Root cause is shared-VM CPU scheduling**: RDMA send/recv uses user-space CQ polling, so a vCPU preempt stalls the loop directly; TCP send/recv blocks in the kernel and gets re-scheduled. Not RNR retry — `min_rnr_timer = 31` would be 491 ms per retry, doesn't fit.
+
+**No TCP crossover** like Phase 2 backend_compare 1 MB showed. Ring all-reduce chunks the buffer into `count/N` pieces (5 MB at N=2 for 10 MB total), so single-stream RDMA never sees the full message and stays inside the QoS-friendly range.
+
+**The fix that made all this work**: `ring_allreduce` initially registered 3 MRs per call (`ScopedBuffer` inside the function). On eRDMA, `ibv_reg_mr` is ~10 ms, so each iteration spent ~30 ms in registration alone — RDMA was 540× slower than TCP. Refactored to NCCL-style: caller pre-registers MRs once before the timed loop and passes `BufferHandle*` into `ring_allreduce`. Hot-path cost dropped from ~30 ms to ~50 μs (1080× speedup).
+
+> Production lesson: RDMA's user-space polling model is sensitive to OS scheduling jitter. NCCL/UCX deployments isolate CPU cores (`isolcpus`, cgroup pinning) or run on bare metal to avoid this. On shared cloud VMs the jitter is fundamental — visible only in the tail, but visible.
 
 ### Phase 4 — Remote KV Cache (Alibaba Cloud ECS, eRDMA, two machines)
 
