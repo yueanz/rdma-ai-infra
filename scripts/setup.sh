@@ -10,16 +10,15 @@ sudo apt-get install -y \
     git cmake gcc g++ make \
     libibverbs-dev librdmacm-dev ibverbs-utils \
     rdma-core \
-    ibacm infiniband-diags \
     iproute2 \
     linux-modules-extra-$(uname -r)
 
 echo "=== Enabling SoftRoCE (if no hardware RDMA) ==="
 # Check if hardware RDMA device exists
 if ibv_devinfo 2>/dev/null | grep -q "hca_id"; then
-    echo "Hardware RDMA device found, skipping SoftRoCE setup"
+    echo "RDMA device already present (hardware or rxe), skipping SoftRoCE setup"
 else
-    echo "No hardware RDMA found, setting up SoftRoCE"
+    echo "No RDMA device found, setting up SoftRoCE"
     sudo modprobe rdma_rxe
     # Detect primary non-loopback interface
     NETDEV=$(ip link show | awk '/^[0-9]+: / && !/lo:/ {gsub(":",""); print $2; exit}')
@@ -27,26 +26,9 @@ else
     sudo rdma link add rxe0 type rxe netdev "$NETDEV"
 fi
 
-echo "=== Selecting RDMA device ==="
-# On Azure MANA, prefer the transport device (no netdev) over the RoCE device.
-# On SoftRoCE / single-device setups, just pick the only device.
-RDMA_DEV=$(rdma dev show 2>/dev/null | awk '{print $2}' | tr -d ':' | while read dev; do
-    sysfs="/sys/class/infiniband/$dev/ports/1/net"
-    if [ ! -d "$sysfs" ]; then
-        echo "$dev"
-        break
-    fi
-done)
-if [ -z "$RDMA_DEV" ]; then
-    RDMA_DEV=$(rdma dev show 2>/dev/null | awk 'NR==1{print $2}')
-fi
-echo "Using RDMA device: $RDMA_DEV"
-grep -q "^export RDMA_DEVICE=" ~/.bashrc && \
-    sed -i "s|^export RDMA_DEVICE=.*|export RDMA_DEVICE=$RDMA_DEV|" ~/.bashrc || \
-    echo "export RDMA_DEVICE=$RDMA_DEV" >> ~/.bashrc
-export RDMA_DEVICE=$RDMA_DEV
-
-echo "=== Verifying RDMA device ==="
+echo "=== Verifying RDMA setup ==="
+# rdma_cm picks the device automatically based on routing to the destination IP,
+# so no manual device selection / env var needed.
 ibv_devinfo
 
 echo "=== Cloning repo ==="
@@ -58,24 +40,16 @@ cd rdma-ai-infra
 git pull
 
 echo "=== Building ==="
-mkdir -p build && cd build
-cmake .. && make -j$(nproc)
-
-echo "=== Testing RDMA loopback ==="
-cd ~/rdma-ai-infra/build/phase1_verbs
-./lat_send_recv &
-SERVER_PID=$!
-sleep 0.5
-./lat_send_recv 127.0.0.1
-wait $SERVER_PID
+cmake -B build && cmake --build build -j
 
 echo ""
 echo "=== Done ==="
 echo "Binaries in ~/rdma-ai-infra/build/"
-echo "  phase1_verbs/lat_send_recv"
-echo "  phase1_verbs/lat_rdma_write"
-echo "  phase1_verbs/bw_rdma_write"
+echo "  phase1_verbs/{lat_send_recv,lat_rdma_write,bw_rdma_write}"
 echo "  phase2_transport/backend_compare"
 echo "  phase3_collective/allreduce_bench"
-echo "  phase4_kv_cache/kv_server"
-echo "  phase4_kv_cache/kv_bench"
+echo "  phase4_kv_cache/{kv_server,kv_bench}"
+echo ""
+echo "Run a quick verification (replace <ip> with the rxe-bound NIC's IP, NOT 127.0.0.1):"
+echo "  Terminal 1: ./build/phase1_verbs/lat_send_recv"
+echo "  Terminal 2: ./build/phase1_verbs/lat_send_recv <ip>"

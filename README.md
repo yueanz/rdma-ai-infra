@@ -27,25 +27,25 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), implementing
 
 | Benchmark | Config | Throughput |
 |---|---|---|
-| `bw_rdma_write` | 1MB × 100 iters, depth=1 (burst) | 9.06 GB/s / 77.83 Gbps |
-| `bw_rdma_write` | 1MB × 1000 iters, depth=1 (sustained) | 3.30 GB/s / 28.37 Gbps |
+| `bw_rdma_write` | 1 MB × 100 iters, depth=1 (burst) | 9.06 GiB/s / 77.83 Gbps |
+| `bw_rdma_write` | 1 MB × 1000 iters, depth=1 (sustained) | 3.30 GiB/s / 28.37 Gbps |
 
-64KB depth sweep (1000 iters):
+64 KB depth sweep (1000 iters):
 
 | depth | eRDMA | SoftRoCE |
 |---|---|---|
-| 1 | 1.63 GB/s / 13.98 Gbps | 0.90 GB/s / 7.71 Gbps |
-| 2 | 3.01 GB/s / 25.82 Gbps | 1.27 GB/s / 10.91 Gbps |
-| 4 | 4.71 GB/s / 40.44 Gbps | 1.65 GB/s / 14.17 Gbps |
-| 8 | 5.74 GB/s / 49.33 Gbps | — (UDP buffer overflow) |
-| 16 | 6.72 GB/s / 57.76 Gbps | — |
+| 1 | 1.63 GiB/s / 13.98 Gbps | 0.90 GiB/s / 7.71 Gbps |
+| 2 | 3.01 GiB/s / 25.82 Gbps | 1.27 GiB/s / 10.91 Gbps |
+| 4 | 4.71 GiB/s / 40.44 Gbps | 1.65 GiB/s / 14.17 Gbps |
+| 8 | 5.74 GiB/s / 49.33 Gbps | — (UDP buffer overflow) |
+| 16 | 6.72 GiB/s / 57.76 Gbps | — |
 | 32 | WR_FLUSH_ERR | — |
 
 **Key insights:**
 - RDMA write is ~21% lower latency than send/recv (median: 31 vs 40 μs) — one-sided ops bypass server-side CPU entirely
 - Burst vs sustained throughput gap (78 → 28 Gbps) reflects Alibaba Cloud eRDMA fabric QoS: short transfers run at line rate, sustained transfers are throttled to a committed rate
 - eRDMA throughput scales near-linearly to depth=8, then diminishing returns as depth=16 saturates the NIC (~58 Gbps); depth=32 errors out with `WR_FLUSH_ERR` — a fabric-level ceiling, not the QP's `max_send_wr` (set to 128 in `rdma_cm_connect.c`).
-- SoftRoCE caps out at depth=4 (14 Gbps); depth≥8 triggers UDP buffer overflow — 65KB × 8 in-flight = 128 concurrent UDP packets exceeds the kernel receive buffer; eRDMA at depth=4 (40 Gbps) already outperforms SoftRoCE's ceiling
+- SoftRoCE caps out at depth=4 (14 Gbps); depth≥8 triggers UDP buffer overflow — 65 KB × 8 in-flight = 128 concurrent UDP packets exceeds the kernel receive buffer; eRDMA at depth=4 (40 Gbps) already outperforms SoftRoCE's ceiling
 
 ### Phase 1 — SoftRoCE (Alibaba Cloud ECS, two machines)
 
@@ -58,7 +58,7 @@ Same physical machines as above; eRDMA unloaded (`modprobe -r erdma`), SoftRoCE 
 
 **Key insights:**
 - eRDMA is ~22% lower latency than SoftRoCE (RDMA write median: 31 vs 40 μs) on the same hardware
-- 1MB writes fail on SoftRoCE (`transport retry counter exceeded`) due to UDP fragmentation; 64KB is the practical ceiling for rdma_rxe
+- 1 MB writes fail on SoftRoCE (`transport retry counter exceeded`) due to UDP fragmentation; 64 KB is the practical ceiling for rdma_rxe
 - See depth sweep table in the eRDMA section above for full throughput comparison
 
 ### Phase 2 — backend_compare (Alibaba Cloud ECS, eRDMA, two machines)
@@ -71,12 +71,12 @@ Compares RDMA backend (rdma_cm + libibverbs) against TCP backend across send/rec
 
 | Backend | Size | Min | Median | p99 | Max | Throughput |
 |---|---|---|---|---|---|---|
-| RDMA | 4KB | 23.42 | 25.10 | **87,806** | 90,814 | 0.01 Gbps |
-| RDMA | 64KB | 31.91 | 34.17 | 87.56† | 45,655 | 2.02 Gbps |
-| RDMA | 1MB | 119.78 | 181.25 | 617.90 | 45,550 | 23.34 Gbps |
-| TCP | 4KB | 28.70 | 30.26 | 37.89 | 45.61 | 1.07 Gbps |
-| TCP | 64KB | 84.75 | 105.99 | 115.66 | 127.46 | 4.93 Gbps |
-| TCP | 1MB | 185.34 | 198.42 | 286.02 | 4,211 | **37.84 Gbps** |
+| RDMA | 4 KB | 23.42 | 25.10 | **87,806** | 90,814 | 0.01 Gbps |
+| RDMA | 64 KB | 31.91 | 34.17 | 87.56† | 45,655 | 2.02 Gbps |
+| RDMA | 1 MB | 119.78 | 181.25 | 617.90 | 45,550 | 23.34 Gbps |
+| TCP | 4 KB | 28.70 | 30.26 | 37.89 | 45.61 | 1.07 Gbps |
+| TCP | 64 KB | 84.75 | 105.99 | 115.66 | 127.46 | 4.93 Gbps |
+| TCP | 1 MB | 185.34 | 198.42 | 286.02 | 4,211 | **37.84 Gbps** |
 
 † RDMA send/recv p99 is **bimodal**: clean (~87 µs) when polling stays scheduled, spikes to tens of ms (max column) when shared-VM CPU scheduling preempts the server's user-space CQ polling loop. Same root cause as the tail jitter analyzed in Phase 3's "On the jitter" section — *not* RNR retry (the observed outliers don't match the 491 ms / retry quantum of `min_rnr_timer = 31`). Run-to-run variance is huge — same code, same environment.
 
@@ -84,22 +84,22 @@ Compares RDMA backend (rdma_cm + libibverbs) against TCP backend across send/rec
 
 | Size | Min | Median | p99 | Max | Throughput |
 |---|---|---|---|---|---|
-| 4KB | 16.87 | 18.11 | 22.16 | 25.35 | 1.82 Gbps |
-| 64KB | 21.32 | 23.29 | 31.13 | 64.20 | **22.36 Gbps** |
-| 1MB | 119.96 | 321.37 | 426.59 | 1,827 | 25.85 Gbps |
+| 4 KB | 16.87 | 18.11 | 22.16 | 25.35 | 1.82 Gbps |
+| 64 KB | 21.32 | 23.29 | 31.13 | 64.20 | **22.36 Gbps** |
+| 1 MB | 119.96 | 321.37 | 426.59 | 1,827 | 25.85 Gbps |
 
 > TCP write is omitted: TCP has no one-sided primitive — any emulation either measures syscall time (completion ≠ remote received) or degenerates into 2-sided send/recv with explicit ACK.
 
 **Key insights:**
 
-- **At 4KB (small messages)**: RDMA write median 18 µs vs TCP send/recv 30 µs — **RDMA wins on latency** by 40%, and write is even faster than RDMA send/recv (one-sided skips server CPU).
-- **At 64KB (medium)**: RDMA write 22 Gbps vs RDMA send/recv 2 Gbps — **same payload size, 11× gap from operation choice alone**. The send/recv throughput collapses because the polling-preempt tail (see footnote on the latency table) drags the average into milliseconds. RDMA write is immune — server CPU is not involved, so no polling loop to preempt.
-- **At 1MB (large)**: TCP send/recv (37.84 Gbps) **outperforms** all RDMA modes (~25 Gbps). Reason: Alibaba eRDMA fabric applies QoS shaping to RDMA traffic at ~25–28 Gbps sustained (matches Phase 1 `bw_rdma_write` 28 Gbps sustained), while TCP traffic is shaped on a different policy.
-- **Practical takeaway for LLM inference (KV cache transfer)**: chunk transfers to ≤64KB, use RDMA write — avoids both the cloud QoS shaping and the polling-preempt tail on send/recv. Phase 4's `KVPool` design is built on this principle.
+- **At 4 KB (small messages)**: RDMA write median 18 µs vs TCP send/recv 30 µs — **RDMA wins on latency** by 40%, and write is even faster than RDMA send/recv (one-sided skips server CPU).
+- **At 64 KB (medium)**: RDMA write 22 Gbps vs RDMA send/recv 2 Gbps — **same payload size, 11× gap from operation choice alone**. The send/recv throughput collapses because the polling-preempt tail (see footnote on the latency table) drags the average into milliseconds. RDMA write is immune — server CPU is not involved, so no polling loop to preempt.
+- **At 1 MB (large)**: TCP send/recv (37.84 Gbps) **outperforms** all RDMA modes (~25 Gbps). Reason: Alibaba eRDMA fabric applies QoS shaping to RDMA traffic at ~25–28 Gbps sustained (matches Phase 1 `bw_rdma_write` 28 Gbps sustained), while TCP traffic is shaped on a different policy.
+- **Practical takeaway for LLM inference (KV cache transfer)**: chunk transfers to ≤64 KB, use RDMA write — avoids both the cloud QoS shaping and the polling-preempt tail on send/recv. Phase 4's `KVPool` design is built on this principle.
 
 ### Phase 3 — Ring All-Reduce (Alibaba Cloud ECS, eRDMA, two machines)
 
-`ring_allreduce` measured at 5 sizes spanning 4 orders of magnitude. RDMA wins on median at every size; the tail tells a more interesting story.
+`ring_allreduce` measured at 5 sizes spanning ~3 orders of magnitude (4 KB to 10 MB; 2,560× ratio). RDMA wins on median at every size; the tail tells a more interesting story.
 
 | count (floats) | bytes | RDMA median | RDMA p99 | TCP median | TCP p99 | Speedup (median) |
 |---|---|---|---|---|---|---|
@@ -160,7 +160,7 @@ At 4 KB / 16 KB / 10 MB, **p99 ≈ max**, meaning ≥2 consecutive iters land in
 - **Three regimes in the scaling curve**:
   - **4–64 KB (latency-bound)**: median almost constant (18→23 μs), throughput scales near-linearly. Protocol overhead dominates, not bandwidth.
   - **64–256 KB (bandwidth-bound)**: throughput peaks at ~41 Gbps, hitting the eRDMA NIC's per-stream ceiling.
-  - **1 MB (QoS-shaped)**: throughput drops back to **28.24 Gbps** — exactly matching Phase 1's `bw_rdma_write` 1MB sustained (28.37 Gbps) and Phase 2's RDMA write (25.85 Gbps). This is Alibaba eRDMA's sustained-rate QoS shaping, **not** a Phase 4 limitation.
+  - **1 MB (QoS-shaped)**: throughput drops back to **28.24 Gbps** — exactly matching Phase 1's `bw_rdma_write` 1 MB sustained (28.37 Gbps) and Phase 2's RDMA write (25.85 Gbps). This is Alibaba eRDMA's sustained-rate QoS shaping, **not** a Phase 4 limitation.
 
 - **`KVPool` abstraction is zero-overhead**: at every size, `kv_bench` matches the raw RDMA numbers from Phase 1/2 within noise. The slab allocator + single pre-registered MR doesn't add a single μs to the data path.
 
@@ -233,8 +233,15 @@ rdma-ai-infra/
 
 ## Build
 
+**Quick start** (auto-detects hardware RDMA / falls back to SoftRoCE, installs deps, builds):
+
 ```bash
-# On Ubuntu 22.04
+bash scripts/setup.sh
+```
+
+**Manual** (Ubuntu 22.04):
+
+```bash
 sudo apt install build-essential cmake libibverbs-dev librdmacm-dev ibverbs-utils rdma-core
 
 # Optional: SoftRoCE for development (production target is Alibaba eRDMA)

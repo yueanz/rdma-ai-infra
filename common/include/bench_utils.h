@@ -37,11 +37,11 @@ static inline void print_bandwidth(const char *label,
     }
     double elapsed_ms = elapsed_ns / 1e6;
     double gbps       = (double)total_bytes * 8 / (elapsed_ns / 1e9) / 1e9;
-    double GBps       = (double)total_bytes / (elapsed_ns / 1e9) / (1024.0 * 1024 * 1024);
+    double GiBps      = (double)total_bytes / (elapsed_ns / 1e9) / (1024.0 * 1024 * 1024);
     printf("\n--- %s ---\n", label);
-    printf("  transferred : %lu bytes (%.2f MB)\n",
+    printf("  transferred : %lu bytes (%.2f MiB)\n",
            total_bytes, total_bytes / (1024.0 * 1024));
     printf("  elapsed     : %.2f ms\n", elapsed_ms);
-    printf("  throughput  : %.2f GB/s  /  %.2f Gbps\n", GBps, gbps);
+    printf("  throughput  : %.2f GiB/s  /  %.2f Gbps\n", GiBps, gbps);
     printf("---------------------------\n");
 }
