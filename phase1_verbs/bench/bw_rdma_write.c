@@ -68,7 +68,7 @@ static void config_usage(const char *prog) {
 int main(int argc, char *argv[]) {
     int ret = 1, i;
     uint64_t bw_start = 0, total_time;
-    config_t cfg = {0};
+    config_t cfg;
     rai_mr_t mr = {0};
     rai_qp_t qp = {0};
     volatile uint8_t *doorbell;

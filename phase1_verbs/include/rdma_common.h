@@ -8,21 +8,14 @@ extern "C" {
 /*
  * rai_conn_info_t
  *
- * The information we exchange with the remote peer out-of-band (via TCP)
- * before RDMA communication can begin. Both sides need each other's info
- * to bring their Queue Pairs to a connected state.
+ * MR addr+rkey pair exchanged out-of-band so each peer can target the
+ * other's registered buffer with one-sided RDMA write/read. QP-level
+ * setup (qpn/psn/gid) is handled by rdma_cm internally.
  */
 typedef struct rai_conn_info
 {
-    uint32_t      qpn;   /* Queue Pair Number — uniquely identifies a QP on a host */
-    uint32_t      psn;   /* Packet Sequence Number — starting sequence number,
-                            used to detect out-of-order or lost packets */
-    union ibv_gid gid;   /* Global Identifier — a 128-bit address (like an IPv6 addr)
-                            used to route packets in RoCE networks */
-    uint64_t      addr;  /* Virtual address of the remote memory buffer,
-                            needed for one-sided RDMA write/read */
-    uint32_t      rkey;  /* Remote Key — authorizes the remote side to access
-                            our memory region; obtained from ibv_reg_mr */
+    uint64_t addr;  /* Virtual address of the remote memory buffer */
+    uint32_t rkey;  /* Remote Key — authorizes RDMA access to that buffer */
 } rai_conn_info_t;
 
 /*

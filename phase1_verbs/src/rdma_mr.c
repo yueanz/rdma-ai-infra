@@ -1,6 +1,7 @@
 #include "rdma_common.h"
 #include "logging.h"
 #include <stdlib.h>
+#include <string.h>
 
 int rai_mr_reg(rai_qp_t *qp, rai_mr_t *mr, size_t size) {
     void *buf;
@@ -55,15 +56,12 @@ int rai_mr_reg_external(rai_qp_t *qp, rai_mr_t *mr, void *buf, size_t size) {
 }
 
 void rai_mr_dereg(rai_mr_t *mr) {
-    if (mr == NULL) {
-        LOG_ERR("rdma memory region is null");
-        return;
-    }
+    if (mr == NULL)
+        return;   /* idempotent cleanup — null is allowed */
     if (mr->mr != NULL && ibv_dereg_mr(mr->mr) != 0) {
         LOG_ERR("failed to deregister memory region");
     }
     if (mr->owns_buf)
         free(mr->buf);
-    mr->size = 0;
     memset(mr, 0, sizeof(*mr));
 }

@@ -37,24 +37,24 @@ int rai_oob_listen(int port, int *listen_fd) {
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
-        LOG_ERR("rdma_listen failed: socket failed");
+        LOG_ERR("rai_oob_listen failed: socket failed");
         return -1;
     }
 
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
-        LOG_INFO("rdma_listen failed: setsockopt failed");
+        LOG_INFO("rai_oob_listen: setsockopt SO_REUSEADDR failed");
 
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        LOG_ERR("rdma_listen failed: bind failed");
+        LOG_ERR("rai_oob_listen failed: bind failed");
         close(fd);
         return -1;
     }
     if (listen(fd, 1) < 0) {
-        LOG_ERR("rdma_listen failed: listen failed");
+        LOG_ERR("rai_oob_listen failed: listen failed");
         close(fd);
         return -1;
     }
@@ -67,24 +67,24 @@ int rai_oob_accept(int listen_fd, rai_qp_t *qp) {
     int conn_fd = -1;
 
     if (qp == NULL) {
-        LOG_ERR("rdma_accept failed: qp is null");
+        LOG_ERR("rai_oob_accept failed: qp is null");
         return -1;
     }
 
     conn_fd = accept(listen_fd, NULL, NULL);
     if (conn_fd < 0) {
-        LOG_ERR("rdma_accept failed: accept failed");
+        LOG_ERR("rai_oob_accept failed: accept failed");
         return -1;
     }
 
     if (send_all(conn_fd, &qp->local, sizeof(qp->local)) != 0) {
-        LOG_ERR("rdma_accept failed: send_all failed");
+        LOG_ERR("rai_oob_accept failed: send_all failed");
         close(conn_fd);
         return -1;
     }
 
     if (recv_all(conn_fd, &qp->remote, sizeof(qp->remote)) != 0) {
-        LOG_ERR("rdma_accept failed: recv_all failed");
+        LOG_ERR("rai_oob_accept failed: recv_all failed");
         close(conn_fd);
         return -1;
     }
@@ -97,39 +97,39 @@ int rai_oob_connect(rai_qp_t *qp, const char *server_ip, int port) {
     int conn_fd = -1, ret = -1;
     struct sockaddr_in addr = {0};
     if (qp == NULL) {
-        LOG_ERR("rdma queue pair is null");
+        LOG_ERR("rai_oob_connect failed: qp is null");
         return -1;
     }
     if (server_ip == NULL) {
-        LOG_ERR("server_ip is null");
+        LOG_ERR("rai_oob_connect failed: server_ip is null");
         return -1;
     }
 
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     if (inet_pton(AF_INET, server_ip, &addr.sin_addr) != 1) {
-        LOG_ERR("invalid server_ip: %s", server_ip);
+        LOG_ERR("rai_oob_connect failed: invalid server_ip: %s", server_ip);
         return -1;
     }
 
     conn_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (conn_fd < 0) {
-        LOG_ERR("socket failed");
+        LOG_ERR("rai_oob_connect failed: socket failed");
         goto out;
     }
 
     if (connect(conn_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        LOG_ERR("connect failed");
+        LOG_ERR("rai_oob_connect failed: connect failed");
         goto out;
     }
 
     if (recv_all(conn_fd, &qp->remote, sizeof(qp->remote)) != 0) {
-        LOG_ERR("recv_all failed");
+        LOG_ERR("rai_oob_connect failed: recv_all failed");
         goto out;
     }
 
     if (send_all(conn_fd, &qp->local, sizeof(qp->local)) != 0) {
-        LOG_ERR("send_all failed");
+        LOG_ERR("rai_oob_connect failed: send_all failed");
         goto out;
     }
 

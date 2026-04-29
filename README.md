@@ -19,7 +19,7 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing 
   - **Done**: Deleted `rai_ctx_init / rai_qp_create / rai_qp_init / rai_qp_connect` (~200 LOC removed); simplified `rai_ctx_t` (dropped `port` / `gid_index` fields). The OOB TCP helpers (`rai_oob_listen / accept / connect`) remain because they're now used by `rai_cm_listen_qp` to set up the MR-exchange channel on `port+1`.
 - [x] **Wrote [`docs/raw-verbs-evolution.md`](docs/raw-verbs-evolution.md)** retrospective covering the manual QP state machine, OOB TCP handshake, the four bugs we hit (GID selection, PSN sync, RNR retry on SoftRoCE, eRDMA rejecting manual `ibv_modify_qp`), and why we moved to rdma_cm.
 - [x] **Re-measure Phase 3 on Alibaba eRDMA** — Done. RDMA + TCP measured at 5 sizes (4 KB → 10 MB). Found and fixed a 1080× perf bug along the way: `ring_allreduce` was re-registering 3 MRs per call; refactored to NCCL-style explicit pre-registration. RDMA wins at every size on median (1.2–2.1× faster than TCP).
-- [x] **Re-measure Phase 4 on Alibaba eRDMA** — Done. Full size sweep (4 KB / 16 KB / 64 KB / 256 KB / 1 MB) for both prefill (RDMA write) and decode (RDMA read). Three-regime curve: latency-bound at small sizes, bandwidth-bound peak ~41 Gbps at 256 KB, QoS-shaped to 28 Gbps at 1 MB (matches Phase 1/2 sustained rate). `KVPool` abstraction confirmed zero-overhead vs raw RDMA. No tail jitter at ≤64 KB (max 35–50 μs) — one-sided ops bypass server CPU entirely.
+- [x] **Re-measure Phase 4 on Alibaba eRDMA** — Done. Full size sweep (4 KB / 16 KB / 64 KB / 256 KB / 1 MB) for both prefill (RDMA write) and decode (RDMA read). Three-regime curve: latency-bound at small sizes, bandwidth-bound peak ~41 Gbps at 256 KB, QoS-shaped to 28 Gbps at 1 MB (matches Phase 1/2 sustained rate). `KVPool` abstraction confirmed zero-overhead vs raw RDMA. Clean tail at ≤64 KB (p99 ≤ 30 μs; isolated max spikes but no clusters) — one-sided ops bypass server CPU entirely.
 - [x] **Fold `rai_ctx_t` into `rai_qp_t` and delete `rdma_context.c`** — Done. Moved PD/CQ into `rai_qp_t`, deleted `rai_ctx_t` and `rdma_context.c`, simplified all APIs from `(ctx, qp)` to `(qp)` (`rai_mr_reg`, `rai_poll_cq`, `rai_cm_server/client/listen_qp/connect_qp`). Updated ~70 call sites across phase1 verbs/benchmarks and phase2 backend.
 
 ## Benchmark Results
@@ -126,9 +126,9 @@ Compares RDMA backend (rdma_cm + libibverbs) against TCP backend across send/rec
 - **Sweet spot (256 KB)**: both backends' tails are clean. Per-iter work (~125 μs) is large enough to amortize over the polling loop, but still under eRDMA's bandwidth cap. RDMA gets its biggest relative edge here (2.12×).
 - **Bandwidth-bound (1–10 MB)**: RDMA's median edge collapses to ~1.2× — eRDMA's QoS shapes RDMA traffic to ~28 Gbps sustained (matches Phase 1's `bw_rdma_write` ceiling), and TCP runs near line speed too. Jitter clusters reappear at 10 MB.
 
-**On the jitter — not what I first thought:**
+**On the jitter:**
 
-Earlier writeup called this "bimodal: 1 iter per 100 outlier." After fixing a p99 indexing bug (`samples[(int)(n*0.99)]` was returning `samples[max_idx]` for n=100; corrected to `(int)((n-1)*0.99)`), the actual pattern is sharper: at 4 KB / 16 KB / 10 MB, **p99 ≈ max**, meaning ≥2 consecutive iters land in the tail — a single hypervisor preempt event taking out a small cluster. At 256 KB / 1 MB the tail is mostly single outliers. **Root cause is shared-VM CPU scheduling**: RDMA send/recv uses user-space CQ polling, so a vCPU preempt stalls the loop directly; TCP send/recv blocks in the kernel and gets re-scheduled. Not RNR retry — `min_rnr_timer = 31` would be 491 ms per retry, doesn't fit.
+At 4 KB / 16 KB / 10 MB, **p99 ≈ max**, meaning ≥2 consecutive iters land in the tail — a single hypervisor preempt event taking out a small cluster. At 256 KB / 1 MB the tail is mostly isolated single outliers. **Root cause is shared-VM CPU scheduling**: RDMA send/recv uses user-space CQ polling, so a vCPU preempt stalls the loop directly; TCP send/recv blocks in the kernel and gets re-scheduled. Not RNR retry — `min_rnr_timer = 31` would be 491 ms per retry, doesn't fit.
 
 **No TCP crossover** like Phase 2 backend_compare 1 MB showed. Ring all-reduce chunks the buffer into `count/N` pieces (5 MB at N=2 for 10 MB total), so single-stream RDMA never sees the full message and stays inside the QoS-friendly range.
 
@@ -144,21 +144,21 @@ Earlier writeup called this "bimodal: 1 iter per 100 outlier." After fixing a p9
 
 | slot_size | Min | Median | p99 | Max | Throughput |
 |---|---|---|---|---|---|
-| 4 KB | 16.80 μs | **18.09 μs** | 22.32 μs | 35.12 μs | 1.79 Gbps |
-| 16 KB | 18.35 μs | **19.30 μs** | 25.25 μs | 40.65 μs | 6.64 Gbps |
-| 64 KB | 21.58 μs | **23.11 μs** | 28.73 μs | 37.75 μs | 22.44 Gbps |
-| 256 KB | 29.21 μs | **31.54 μs** | 139.00 μs | 1430.59 μs | **41.19 Gbps** ⬆ peak |
-| 1 MB | 62.85 μs | **314.42 μs** | 428.13 μs | 4782.74 μs | 28.24 Gbps |
+| 4 KB | 16.93 μs | **17.77 μs** | 22.58 μs | 33.19 μs | 1.81 Gbps |
+| 16 KB | 18.14 μs | **19.16 μs** | 23.73 μs | 27.69 μs | 6.70 Gbps |
+| 64 KB | 22.05 μs | **23.61 μs** | 28.56 μs | 34.66 μs | 22.12 Gbps |
+| 256 KB | 29.43 μs | **31.53 μs** | 149.97 μs | 1185.74 μs | **41.20 Gbps** ⬆ peak |
+| 1 MB | 64.15 μs | **314.02 μs** | 426.93 μs | 5503.09 μs | 28.23 Gbps |
 
 **decode (RDMA read from remote slot)**
 
 | slot_size | Min | Median | p99 | Max | Throughput |
 |---|---|---|---|---|---|
-| 4 KB | 18.34 μs | **19.99 μs** | 23.88 μs | 27.07 μs | 1.63 Gbps |
-| 16 KB | 19.57 μs | **21.59 μs** | 27.97 μs | 47.55 μs | 6.03 Gbps |
-| 64 KB | 22.87 μs | **24.55 μs** | 30.36 μs | 49.28 μs | 21.10 Gbps |
-| 256 KB | 30.73 μs | **33.18 μs** | 149.27 μs | 1458.72 μs | 41.23 Gbps |
-| 1 MB | 97.52 μs | **309.80 μs** | 524.29 μs | 5440.56 μs | 28.24 Gbps |
+| 4 KB | 18.28 μs | **20.21 μs** | 24.05 μs | 67.92 μs | 1.62 Gbps |
+| 16 KB | 19.46 μs | **21.42 μs** | 24.50 μs | 29.02 μs | 6.10 Gbps |
+| 64 KB | 22.88 μs | **24.67 μs** | 30.42 μs | 208.30 μs | 20.90 Gbps |
+| 256 KB | 31.02 μs | **33.15 μs** | 142.76 μs | 1317.69 μs | 41.21 Gbps |
+| 1 MB | 98.83 μs | **313.90 μs** | 435.00 μs | 4532.94 μs | 28.24 Gbps |
 
 **Key insights:**
 
@@ -171,7 +171,7 @@ Earlier writeup called this "bimodal: 1 iter per 100 outlier." After fixing a p9
 
 - **RDMA read ≈ RDMA write**: at every size, decode is ~5–10% slower than prefill. RDMA read needs one extra NIC round-trip (fetch vs push); the small gap is expected. Both throughputs match in the bandwidth-bound regime because they're bottlenecked by the same fabric.
 
-- **No tail jitter at small sizes** (max 35–50 μs at ≤64 KB): unlike Phase 2/3 where `send/recv` showed 40–90 ms outliers from cloud-VM scheduling, Phase 4's one-sided write/read **doesn't involve the server's CPU** at all — server is just a passive doorbell target. This is the RDMA-write design pattern's whole point. **Tail jitter only appears at ≥256 KB** (max 1.4–5 ms) where transfers take long enough for cloud-fabric variance to show.
+- **Clean tail at small sizes** (p99 ≤ 30 μs at ≤64 KB): unlike Phase 2/3 where `send/recv` showed 40–90 ms outliers from cloud-VM scheduling, Phase 4's one-sided write/read **doesn't involve the server's CPU** at all — server is just a passive doorbell target. Max occasionally spikes (e.g. 64 KB decode hit 208 μs from a single iter), but the spikes stay isolated and never cluster — p99 is the reliable description. **p99 jitter only ramps up at ≥256 KB** (p99 ~150 μs, max 1–5 ms) where transfers take long enough for cloud-fabric variance to show.
 
 > **vLLM block size context**: a typical vLLM KV block (16 tokens × Llama-7B FP16) is ~256 KB; for larger models or block sizes it can hit 1 MB+. Phase 4's 256 KB result (31 μs median, 41 Gbps) is the sweet spot — small enough to dodge the QoS shaping, large enough to amortize per-op overhead. The decode path uses RDMA read so the consumer can pull blocks from the producer without the producer's CPU involvement, matching vLLM's disaggregated prefill/decode topology.
 

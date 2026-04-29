@@ -72,7 +72,7 @@ int run_server_sendrecv(Transport *t, Config &cfg) {
         return -1;
     }
 
-    // listen() initializes ctx_ (PD), so reg_buf must come after it
+    // listen() builds qp_ (which owns the PD), so reg_buf must come after it
     ScopedBuffer sb;
     if (sb.init(t, buf.data(), len) != 0) {
         LOG_ERR("run_server_sendrecv failed: sb init failed");
@@ -181,7 +181,7 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
     uint64_t total_time = time_elapsed_ns(bw_start, time_now_ns());
     std::sort(latencies.begin(), latencies.end());
     print_latency(cfg.is_rdma ? "send/recv latency RTT (rdma)" : "send/recv latency RTT (tcp)", latencies.data(), cfg.iters);
-    print_bandwidth("rdma send/recv throughput", (uint64_t)cfg.size*cfg.iters, total_time);
+    print_bandwidth(cfg.is_rdma ? "send/recv throughput (rdma)" : "send/recv throughput (tcp)", (uint64_t)cfg.size*cfg.iters, total_time);
     return 0;
 }
 
@@ -202,7 +202,7 @@ int run_server_write(Transport *t, Config &cfg) {
         return -1;
     }
 
-    // listen() initializes ctx_ (PD), so reg_buf must come after it
+    // listen() builds qp_ (which owns the PD), so reg_buf must come after it
     ScopedBuffer sb;
     if (sb.init(t, buf.data(), len) != 0) {
         LOG_ERR("run_server_write failed: sb init failed");
@@ -215,7 +215,7 @@ int run_server_write(Transport *t, Config &cfg) {
     }
 
     if (t->exchange_buf(&sb.h, &unused_remote_addr, &unused_rkey) != 0) {
-        LOG_ERR("run_server_write failed: accept failed");
+        LOG_ERR("run_server_write failed: exchange_buf failed");
         return -1;
     }
 
@@ -255,7 +255,7 @@ int run_client_write(Transport *t, Config &cfg) {
     }
 
     if (t->exchange_buf(&sb.h, &remote_addr, &rkey) != 0) {
-        LOG_ERR("run_client_write failed: accept failed");
+        LOG_ERR("run_client_write failed: exchange_buf failed");
         return -1;
     }
 

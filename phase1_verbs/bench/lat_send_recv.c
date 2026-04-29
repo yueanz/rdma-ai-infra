@@ -67,7 +67,7 @@ static int cmp_u64(const void *a, const void *b) {
 int main(int argc, char *argv[]) {
     int ret = 1, i;
     uint64_t iter_start;
-    config_t cfg = {0};
+    config_t cfg;
     rai_mr_t mr = {0};
     rai_qp_t qp = {0};
     uint64_t *latencies = NULL;
