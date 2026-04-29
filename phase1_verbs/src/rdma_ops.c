@@ -15,8 +15,8 @@ int rai_post_send(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint64_t id, size_t
         LOG_ERR("rai_post_send failed: mr or mr->mr is null");
         return -1;
     }
-    if (size == 0 || size > mr->size) {
-        LOG_ERR("post size is 0 or post size exceeds the size of mr buf");
+    if (size == 0 || (size_t)size + offset > mr->size) {
+        LOG_ERR("post size invalid: size=%u offset=%zu mr_size=%zu", size, offset, mr->size);
         return -1;
     }
 
@@ -50,8 +50,8 @@ int rai_post_recv(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint64_t id, size_t
         LOG_ERR("rai_post_recv failed: mr or mr->mr is null");
         return -1;
     }
-    if (size == 0 || size > mr->size) {
-        LOG_ERR("recv size is 0 or recv size exceeds the size of mr buf");
+    if (size == 0 || (size_t)size + offset > mr->size) {
+        LOG_ERR("recv size invalid: size=%u offset=%zu mr_size=%zu", size, offset, mr->size);
         return -1;
     }
 
@@ -85,8 +85,8 @@ int rai_post_write(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint32_t send_flag
         LOG_ERR("rai_post_write failed: mr or mr->mr is null");
         return -1;
     }
-    if (size == 0 || size > mr->size) {
-        LOG_ERR("write size is 0 or write size exceeds the size of mr buf");
+    if (size == 0 || (size_t)size + offset > mr->size) {
+        LOG_ERR("write size invalid: size=%u offset=%zu mr_size=%zu", size, offset, mr->size);
         return -1;
     }
 
@@ -124,8 +124,8 @@ int rai_post_read(rai_qp_t *qp, rai_mr_t *mr, uint32_t size,
         LOG_ERR("rai_post_read failed: mr or mr->mr is null");
         return -1;
     }
-    if (size == 0 || size > mr->size) {
-        LOG_ERR("read size is 0 or read size exceeds the size of mr buf");
+    if (size == 0 || (size_t)size + offset > mr->size) {
+        LOG_ERR("read size invalid: size=%u offset=%zu mr_size=%zu", size, offset, mr->size);
         return -1;
     }
 

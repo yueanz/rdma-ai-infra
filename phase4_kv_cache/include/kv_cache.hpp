@@ -13,17 +13,16 @@ enum { KV_MSG_ALLOC = 0, KV_MSG_FREE = 1, KV_MSG_META = 2 };
  * alloc: pop from free_list, return slot index (-1 if full)
  * free:  push slot index back onto free_list
  *
- * addr/rkey are set after MR registration and sent to clients
- * so they can issue RDMA write (prefill) and RDMA read (decode)
- * directly into the slot at offset = slot_idx * slot_size.
+ * The MR's addr+rkey are exchanged with the client via exchange_buf at
+ * connect time — the client computes per-slot offsets from base_addr.
+ * Server itself never reads its own MR addr/rkey: the slab is the *target*
+ * of client RDMA write/read; server's role is just to ALLOC/FREE slots.
  */
 struct KVPool {
     std::vector<char>    mem;        // owns the backing storage
     size_t               slot_size; // bytes per slot
     int                  num_slots; // total number of slots
     std::vector<int>     free_list; // indices of available slots
-    uint64_t             addr;      // MR base address (exposed to clients)
-    uint32_t             rkey;      // MR rkey (exposed to clients)
 };
 
 /*

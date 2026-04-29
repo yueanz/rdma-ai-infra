@@ -57,16 +57,13 @@ void TcpTransport::dereg_buf(BufferHandle *h) {
 }
 
 int TcpTransport::send_async(const BufferHandle *h, size_t len, uint64_t id, size_t offset) {
-    if (h == nullptr || len == 0) {
-        LOG_ERR("tcp send_async failed: h is null or len is 0");
+    if (h == nullptr || len == 0 || h->addr == nullptr) {
+        LOG_ERR("tcp send_async failed: h/buf null or len==0");
         return -1;
     }
-    if (len > h->size) {
-        LOG_ERR("tcp send_async failed: len exceeds the size of buf");
-        return -1;
-    }
-    if (h->addr == nullptr) {
-        LOG_ERR("tcp send_async failed: buf is null");
+    if (len + offset > h->size) {
+        LOG_ERR("tcp send_async failed: len=%zu offset=%zu exceeds buf size=%zu",
+                len, offset, h->size);
         return -1;
     }
 
@@ -74,21 +71,17 @@ int TcpTransport::send_async(const BufferHandle *h, size_t len, uint64_t id, siz
         LOG_ERR("tcp send_async failed: send_all failed");
         return -1;
     }
-
     return 0;
 }
 
 int TcpTransport::recv_async(BufferHandle *h, size_t len, uint64_t id, size_t offset) {
-    if (h == nullptr || len == 0) {
-        LOG_ERR("tcp recv_async failed: h is null or len is 0");
+    if (h == nullptr || len == 0 || h->addr == nullptr) {
+        LOG_ERR("tcp recv_async failed: h/buf null or len==0");
         return -1;
     }
-    if (len > h->size) {
-        LOG_ERR("tcp recv_async failed: len exceeds the size of buf");
-        return -1;
-    }
-    if (h->addr == nullptr) {
-        LOG_ERR("tcp recv_async failed: buf is null");
+    if (len + offset > h->size) {
+        LOG_ERR("tcp recv_async failed: len=%zu offset=%zu exceeds buf size=%zu",
+                len, offset, h->size);
         return -1;
     }
 
@@ -96,7 +89,6 @@ int TcpTransport::recv_async(BufferHandle *h, size_t len, uint64_t id, size_t of
         LOG_ERR("tcp recv_async failed: recv_all failed");
         return -1;
     }
-
     return 0;
 }
 
@@ -169,6 +161,8 @@ int TcpTransport::connect(const char *host, int port) {
 
     if (::connect(fd_, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         LOG_ERR("tcp connect failed: connect failed");
+        ::close(fd_);
+        fd_ = -1;
         return -1;
     }
     is_server_ = false;
@@ -193,11 +187,15 @@ int TcpTransport::listen(int port) {
 
     if (bind(listen_fd_, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         LOG_ERR("tcp listen failed: bind failed");
+        ::close(listen_fd_);
+        listen_fd_ = -1;
         return -1;
     }
 
     if (::listen(listen_fd_, 1) < 0) {
         LOG_ERR("tcp listen failed: listen failed");
+        ::close(listen_fd_);
+        listen_fd_ = -1;
         return -1;
     }
     is_server_ = true;
@@ -214,10 +212,14 @@ int TcpTransport::accept() {
 }
 
 void TcpTransport::close() {
-    if (fd_ >= 0)
+    if (fd_ >= 0) {
         ::close(fd_);
-    if (listen_fd_ >= 0)
+        fd_ = -1;
+    }
+    if (listen_fd_ >= 0) {
         ::close(listen_fd_);
+        listen_fd_ = -1;
+    }
 }
 
 Transport *create_tcp_transport() { return new TcpTransport(); }

@@ -148,9 +148,6 @@ int RdmaTransport::connect(const char *host, int port) {
         rai_qp_destroy(&qp_);
     }
 
-    if (qp_.pd != nullptr) {
-    }
-
     if (rai_cm_connect_qp(&qp_, host, port) != 0) {
         LOG_ERR("rdma connect failed: rai_cm_connect_qp failed");
         return -1;
@@ -165,9 +162,6 @@ int RdmaTransport::connect(const char *host, int port) {
 int RdmaTransport::listen(int port) {
     if (qp_.qp != nullptr) {
         rai_qp_destroy(&qp_);
-    }
-
-    if (qp_.pd != nullptr) {
     }
 
     if (mr_listen_fd_ >= 0) {

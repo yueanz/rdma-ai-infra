@@ -4,17 +4,18 @@
 #include <string.h>
 
 /* Destroy order matters: QP → CQ → PD → cm_id → ec.
- * Caller must rai_mr_dereg() before calling this (MR depends on PD). */
+ * Caller must rai_mr_dereg() before calling this (MR depends on PD).
+ * Idempotent: safe on a partially-initialized qp (any field may be NULL). */
 void rai_qp_destroy(rai_qp_t *qp) {
     if (qp == NULL)
         return;
     struct rdma_cm_id *id = (struct rdma_cm_id *)qp->cm_id;
     if (id && id->qp)
         rdma_destroy_qp(id);
-    if (qp->cq)
-        ibv_destroy_cq(qp->cq);
-    if (qp->pd)
-        ibv_dealloc_pd(qp->pd);
+    if (qp->cq && ibv_destroy_cq(qp->cq) != 0)
+        LOG_ERR("ibv_destroy_cq failed");
+    if (qp->pd && ibv_dealloc_pd(qp->pd) != 0)
+        LOG_ERR("ibv_dealloc_pd failed");
     if (id)
         rdma_destroy_id(id);
     if (qp->ec)

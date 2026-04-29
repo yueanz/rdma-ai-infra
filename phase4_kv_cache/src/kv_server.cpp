@@ -167,7 +167,12 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        if (data->exchange_buf(&sb.h, &pool.addr, &pool.rkey) != 0) {
+        /* Server's exchange_buf sends the slab MR's addr/rkey to the client.
+         * The remote-side outputs (client's MR info) are unused here — the
+         * server is purely a passive target of client RDMA write/read. */
+        uint64_t unused_addr;
+        uint32_t unused_rkey;
+        if (data->exchange_buf(&sb.h, &unused_addr, &unused_rkey) != 0) {
             LOG_ERR("exchange_buf failed");
             return 1;
         }

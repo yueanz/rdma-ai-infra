@@ -279,7 +279,9 @@ int run_client_write(Transport *t, Config &cfg) {
 
     uint64_t total_time = time_elapsed_ns(bw_start, time_now_ns());
     std::sort(latencies.begin(), latencies.end());
-    print_latency(cfg.is_rdma ? "write latency (rdma)" : "write latency (tcp)", latencies.data(), cfg.iters);
+    /* run_client_write only runs in is_rdma=true mode (TCP write is skipped
+     * in main; see the explanation in main()'s write block). */
+    print_latency("write latency (rdma)", latencies.data(), cfg.iters);
     print_bandwidth("rdma write throughput", (uint64_t)cfg.size*cfg.iters, total_time);
     return 0;
 }

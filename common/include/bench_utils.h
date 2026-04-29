@@ -5,14 +5,21 @@
 
 #define kWarmup 20
 
-/* Print latency results. samples must be sorted ascending. */
+/* Print latency results. samples must be sorted ascending.
+ *
+ * Percentile indexing: for percentile p of n samples, the 0-indexed
+ * position is (int)((n - 1) * p/100). This puts p99 at samples[98]
+ * for n=100 (the 99th value out of 100), not samples[99] (which would
+ * always equal max). */
 static inline void print_latency(const char *label, uint64_t *samples, int n) {
+    int idx_median = (n - 1) / 2;
+    int idx_p99    = (int)((n - 1) * 0.99);
     printf("\n--- %s ---\n", label);
     printf("  %-10s %-10s %-10s %-10s\n", "min(us)", "median(us)", "p99(us)", "max(us)");
     printf("  %-10.2f %-10.2f %-10.2f %-10.2f\n",
         ns_to_us(samples[0]),
-        ns_to_us(samples[n / 2]),
-        ns_to_us(samples[(int)(n * 0.99)]),
+        ns_to_us(samples[idx_median]),
+        ns_to_us(samples[idx_p99]),
         ns_to_us(samples[n - 1]));
     printf("---------------------------\n");
 }

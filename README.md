@@ -19,7 +19,7 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), progressing 
   - **Done**: Deleted `rai_ctx_init / rai_qp_create / rai_qp_init / rai_qp_connect` (~200 LOC removed); simplified `rai_ctx_t` (dropped `port` / `gid_index` fields). The OOB TCP helpers (`rai_oob_listen / accept / connect`) remain because they're now used by `rai_cm_listen_qp` to set up the MR-exchange channel on `port+1`.
 - [x] **Wrote [`docs/raw-verbs-evolution.md`](docs/raw-verbs-evolution.md)** retrospective covering the manual QP state machine, OOB TCP handshake, the four bugs we hit (GID selection, PSN sync, RNR retry on SoftRoCE, eRDMA rejecting manual `ibv_modify_qp`), and why we moved to rdma_cm.
 - [x] **Re-measure Phase 3 on Alibaba eRDMA** — Done. RDMA + TCP measured at 5 sizes (4 KB → 10 MB). Found and fixed a 1080× perf bug along the way: `ring_allreduce` was re-registering 3 MRs per call; refactored to NCCL-style explicit pre-registration. RDMA wins at every size (1.2–2.4× faster than TCP).
-- [ ] **Re-measure Phase 4 on Alibaba eRDMA** — current Phase 4 numbers are from Azure MANA RoCE (prefill) and SoftRoCE loopback (decode), historical before the eRDMA commitment.
+- [x] **Re-measure Phase 4 on Alibaba eRDMA** — Done. Full size sweep (4 KB / 16 KB / 64 KB / 256 KB / 1 MB) for both prefill (RDMA write) and decode (RDMA read). Three-regime curve: latency-bound at small sizes, bandwidth-bound peak ~41 Gbps at 256 KB, QoS-shaped to 28 Gbps at 1 MB (matches Phase 1/2 sustained rate). `KVPool` abstraction confirmed zero-overhead vs raw RDMA. No tail jitter at ≤64 KB (max 35–50 μs) — one-sided ops bypass server CPU entirely.
 - [x] **Fold `rai_ctx_t` into `rai_qp_t` and delete `rdma_context.c`** — Done. Moved PD/CQ into `rai_qp_t`, deleted `rai_ctx_t` and `rdma_context.c`, simplified all APIs from `(ctx, qp)` to `(qp)` (`rai_mr_reg`, `rai_poll_cq`, `rai_cm_server/client/listen_qp/connect_qp`). Updated ~70 call sites across phase1 verbs/benchmarks and phase2 backend.
 
 ## Benchmark Results
@@ -126,16 +126,44 @@ Compares RDMA backend (rdma_cm + libibverbs) against TCP backend across send/rec
 
 > Production lesson: RDMA's user-space polling model is sensitive to OS scheduling jitter. NCCL/UCX deployments isolate CPU cores (`isolcpus`, cgroup pinning) or run on bare metal to avoid this. On shared cloud VMs the jitter is fundamental.
 
-### Phase 4 — Remote KV Cache (slot_size=4096B)
+### Phase 4 — Remote KV Cache (Alibaba Cloud ECS, eRDMA, two machines)
 
-| Benchmark | Environment | Min | Median | p99 | Max |
+`kv_bench` measured at 5 slot sizes spanning the typical vLLM KV-block range (4 KB → 1 MB).
+
+**prefill (RDMA write to remote slot)**
+
+| slot_size | Min | Median | p99 | Max | Throughput |
 |---|---|---|---|---|---|
-| `kv_bench` prefill (RDMA write) | Azure MANA RoCE, loopback | 8.41 μs | 8.50 μs | 10.28 μs | 59.89 μs |
-| `kv_bench` decode (RDMA read) | SoftRoCE, loopback | 8.80 μs | 8.90 μs | 9.20 μs | 25.40 μs |
+| 4 KB | 16.80 μs | **18.09 μs** | 22.32 μs | 35.12 μs | 1.79 Gbps |
+| 16 KB | 18.35 μs | **19.30 μs** | 25.25 μs | 40.65 μs | 6.64 Gbps |
+| 64 KB | 21.58 μs | **23.11 μs** | 28.73 μs | 37.75 μs | 22.44 Gbps |
+| 256 KB | 29.21 μs | **31.54 μs** | 139.00 μs | 1430.59 μs | **41.19 Gbps** ⬆ peak |
+| 1 MB | 62.85 μs | **314.42 μs** | 428.13 μs | 4782.74 μs | 28.24 Gbps |
 
-Throughput (1000 iters × 4096B): prefill **0.44 GB/s / 3.79 Gbps** · decode **0.42 GB/s / 3.63 Gbps**
+**decode (RDMA read from remote slot)**
 
-> Historical: prefill measured on Azure MANA RoCE hardware before committing to Alibaba Cloud eRDMA; decode on SoftRoCE loopback. Will be re-measured on eRDMA two-machine setup as part of Phase 4 cleanup.
+| slot_size | Min | Median | p99 | Max | Throughput |
+|---|---|---|---|---|---|
+| 4 KB | 18.34 μs | **19.99 μs** | 23.88 μs | 27.07 μs | 1.63 Gbps |
+| 16 KB | 19.57 μs | **21.59 μs** | 27.97 μs | 47.55 μs | 6.03 Gbps |
+| 64 KB | 22.87 μs | **24.55 μs** | 30.36 μs | 49.28 μs | 21.10 Gbps |
+| 256 KB | 30.73 μs | **33.18 μs** | 149.27 μs | 1458.72 μs | 41.23 Gbps |
+| 1 MB | 97.52 μs | **309.80 μs** | 524.29 μs | 5440.56 μs | 28.24 Gbps |
+
+**Key insights:**
+
+- **Three regimes in the scaling curve**:
+  - **4–64 KB (latency-bound)**: median almost constant (18→23 μs), throughput scales near-linearly. Protocol overhead dominates, not bandwidth.
+  - **64–256 KB (bandwidth-bound)**: throughput peaks at ~41 Gbps, hitting the eRDMA NIC's per-stream ceiling.
+  - **1 MB (QoS-shaped)**: throughput drops back to **28.24 Gbps** — exactly matching Phase 1's `bw_rdma_write` 1MB sustained (28.37 Gbps) and Phase 2's RDMA write (25.85 Gbps). This is Alibaba eRDMA's sustained-rate QoS shaping, **not** a Phase 4 limitation.
+
+- **`KVPool` abstraction is zero-overhead**: at every size, `kv_bench` matches the raw RDMA numbers from Phase 1/2 within noise. The slab allocator + single pre-registered MR doesn't add a single μs to the data path.
+
+- **RDMA read ≈ RDMA write**: at every size, decode is ~5–10% slower than prefill. RDMA read needs one extra NIC round-trip (fetch vs push); the small gap is expected. Both throughputs match in the bandwidth-bound regime because they're bottlenecked by the same fabric.
+
+- **No tail jitter at small sizes** (max 35–50 μs at ≤64 KB): unlike Phase 2/3 where `send/recv` showed 40–90 ms outliers from cloud-VM scheduling, Phase 4's one-sided write/read **doesn't involve the server's CPU** at all — server is just a passive doorbell target. This is the RDMA-write design pattern's whole point. **Tail jitter only appears at ≥256 KB** (max 1.4–5 ms) where transfers take long enough for cloud-fabric variance to show.
+
+> **vLLM block size context**: a typical vLLM KV block (16 tokens × Llama-7B FP16) is ~256 KB; for larger models or block sizes it can hit 1 MB+. Phase 4's 256 KB result (31 μs median, 41 Gbps) is the sweet spot — small enough to dodge the QoS shaping, large enough to amortize per-op overhead. The decode path uses RDMA read so the consumer can pull blocks from the producer without the producer's CPU involvement, matching vLLM's disaggregated prefill/decode topology.
 
 ## Architecture
 
@@ -216,47 +244,68 @@ cmake .. && make
 
 ## Running Benchmarks
 
-```bash
-# Phase 4 — Remote KV Cache
-cd build/phase4_kv_cache
+All benchmarks are server/client pairs — start the server on one machine, run the client on another (or both on `127.0.0.1` for local SoftRoCE testing). Default port is 12345 unless noted.
 
-# Terminal 1 — server (port, num_slots, slot_size)
-./kv_server 12345 16 4096
-
-# Terminal 2 — client
-./kv_bench <server_ip> 12345 [--iters <n>]
-```
+### Phase 1 — raw RDMA primitives
 
 ```bash
-# Phase 1
 cd build/phase1_verbs
 
-# Terminal 1 — server
-./lat_send_recv
+# Send/recv RTT
+./lat_send_recv                           # server
+./lat_send_recv <server_ip>               # client
 
-# Terminal 2 — client
-./lat_send_recv 127.0.0.1
-
-# RDMA write latency
+# RDMA write latency (one-sided)
 ./lat_rdma_write
-./lat_rdma_write 127.0.0.1
+./lat_rdma_write <server_ip>
 
-# Throughput (server and client must use the same --size)
-./bw_rdma_write --size 1048576
-./bw_rdma_write <server_ip> --size 1048576 --iters 1000 --depth 1
+# RDMA write throughput (server and client must use the same --size)
+./bw_rdma_write --size 65536
+./bw_rdma_write <server_ip> --size 65536 --iters 1000 --depth 16
+```
 
-# Phase 2
+### Phase 2 — Transport abstraction (RDMA vs TCP)
+
+```bash
 cd build/phase2_transport
 
-# Terminal 1 — server
-./backend_compare <rdma|tcp> <port>
+./backend_compare rdma                    # server
+./backend_compare rdma <server_ip>        # client (TCP: replace `rdma` with `tcp`)
 
-# Terminal 2 — client
-./backend_compare <rdma|tcp> <server_ip> <port>
+# Use --port / --iters / --size for non-defaults; port is *not* positional.
+./backend_compare rdma --port 23456
+```
+
+### Phase 3 — ring all-reduce (multi-process collective)
+
+```bash
+cd build/phase3_collective
+
+# Both ranks need to start (almost) simultaneously — connect retries for ~1 sec.
+# Args: <rank> <world_size> <base_port> <host_0> <host_1> [...] [--rdma] [--count N] [--iters N]
+
+# rank 0:
+./allreduce_bench 0 2 12345 <host_0_ip> <host_1_ip> --rdma
+
+# rank 1 (on the other machine):
+./allreduce_bench 1 2 12345 <host_0_ip> <host_1_ip> --rdma
+```
+
+### Phase 4 — Remote KV cache
+
+```bash
+cd build/phase4_kv_cache
+
+# Server: kv_server <port> <num_slots> <slot_size>
+./kv_server 12345 16 4096
+
+# Client (kv_bench wires up ctrl-on-port + data-on-port+2 internally):
+./kv_bench <server_ip> 12345 [--iters <n>]
 ```
 
 ## Environment
 
-- OS: Ubuntu 22.04 LTS
-- RDMA: SoftRoCE (`rdma_rxe`) over loopback for development; designed for real InfiniBand / RoCE hardware
-- Compiler: GCC 11+, `-std=c11` (Phase 1), `-std=c++17` (Phase 2+)
+- **OS**: Ubuntu 22.04 LTS
+- **RDMA**: Alibaba Cloud ECS with eRDMA (production target); SoftRoCE (`rdma_rxe`) for local development
+- **Network**: rdma_cm-based connection setup (works across iWARP / RoCE / IB)
+- **Compiler**: GCC 11+, `-std=c11` (Phase 1), `-std=c++17` (Phase 2+)

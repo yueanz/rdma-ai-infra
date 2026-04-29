@@ -1,5 +1,6 @@
 #!/bin/bash
-# Setup script for Ubuntu (Azure VM)
+# Setup script for Ubuntu — auto-detects hardware RDMA, falls back to SoftRoCE.
+# Production target is Alibaba Cloud ECS with eRDMA; works on any Ubuntu 22.04+.
 # Usage: bash setup.sh
 set -e
 
