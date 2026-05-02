@@ -255,7 +255,7 @@ cmake -B build && cmake --build build -j
 
 ## Running Benchmarks
 
-All benchmarks are server/client pairs — start the server on one machine, run the client on another (or both on `127.0.0.1` for local SoftRoCE testing). Default port is 12345 unless noted.
+All benchmarks are server/client pairs — start the server on one machine, run the client on another. For single-machine testing, use the RDMA-bound NIC's actual IP, **not `127.0.0.1`** (rxe/eRDMA is bound to a physical netdev like `eth0`; `127.0.0.1` routes through `lo` where no RDMA device is present, and the connection fails with `RDMA_CM_EVENT_CONNECT_ERROR`). Default port is 12345 unless noted.
 
 ### Phase 1 — raw RDMA primitives
 
