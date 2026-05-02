@@ -80,7 +80,6 @@ Our raw verbs path called `ibv_modify_qp(qp, &attr, RTR_attrs)` and got back `er
 | PSN handshake | You exchange via OOB | Internal |
 | QP state machine (INIT/RTR/RTS) | You write three `ibv_modify_qp` calls | `rdma_connect` / `rdma_accept` |
 | iWARP support | Doesn't work | Works |
-| Code size | ~400 lines (ctx + qp + oob) | ~150 lines (one CM event loop) |
 
 The CM model is more restrictive — you can't tweak QP attrs as freely — but the lost flexibility wasn't being used anywhere in this project. For an eRDMA target, it's not even optional.
 
@@ -97,9 +96,9 @@ rdma_context.c      — rai_ctx_init       (device open, manual selection)
 rdma_qp.c functions — rai_qp_create      (manual ibv_create_qp + GID query)
                       rai_qp_init        (manual INIT transition)
                       rai_qp_connect     (manual RTR + RTS transitions)
-oob_exchange_client — re-targeted for MR exchange only
-oob_accept          — re-targeted for MR exchange only
 ```
+
+The OOB TCP helpers (`rai_oob_listen / accept / connect`) survived but with a smaller scope — see "What we kept" above.
 
 `rai_ctx_t` itself was eventually folded into `rai_qp_t` once it became clear the ctx/qp split was a holdover from the raw verbs design (where ctx held the manually-opened device). With rdma_cm, the device context is owned by the cm_id and never independently held — there's no role for a separate `ctx_t`.
 

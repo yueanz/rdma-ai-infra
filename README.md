@@ -168,7 +168,7 @@ At 4 KB / 16 KB / 10 MB, **p99 ≈ max**, meaning ≥2 consecutive iters land in
 
 - **Clean tail at small sizes** (p99 ≤ 30 μs at ≤64 KB): unlike Phase 2/3 where `send/recv` showed 40–90 ms outliers from cloud-VM scheduling, Phase 4's one-sided write/read **doesn't involve the server's CPU** at all — server is just a passive doorbell target. Max occasionally spikes (e.g. 64 KB decode hit 208 μs from a single iter), but the spikes stay isolated and never cluster — p99 is the reliable description. **p99 jitter ramps up at ≥256 KB** (p99 ~150 μs at 256 KB, ~430 μs at 1 MB; max 1–5 ms across both) where transfers take long enough for cloud-fabric variance to show.
 
-> **vLLM block size context**: a typical vLLM KV block (16 tokens × Llama-7B FP16) is ~256 KB; for larger models or block sizes it can hit 1 MB+. Phase 4's 256 KB result (31 μs median, 41 Gbps) is the sweet spot — small enough to dodge the QoS shaping, large enough to amortize per-op overhead. The decode path uses RDMA read so the consumer can pull blocks from the producer without the producer's CPU involvement, matching vLLM's disaggregated prefill/decode topology.
+> **vLLM block size context**: a typical vLLM **per-layer** KV block (16 tokens × Llama-7B FP16) is ~256 KB; bigger block sizes or non-GQA models with wider attention can push per-layer blocks past 1 MB. Phase 4's 256 KB result (31 μs median, 41 Gbps) is the sweet spot — small enough to dodge the QoS shaping, large enough to amortize per-op overhead. The decode path uses RDMA read so the consumer can pull blocks from the producer without the producer's CPU involvement, matching vLLM's disaggregated prefill/decode topology.
 
 ## Architecture
 
@@ -319,4 +319,4 @@ cd build/phase4_kv_cache
 - **OS**: Ubuntu 22.04 LTS
 - **RDMA**: Alibaba Cloud ECS with eRDMA (production target); SoftRoCE (`rdma_rxe`) for local development
 - **Network**: rdma_cm-based connection setup (works across iWARP / RoCE / IB)
-- **Compiler**: GCC 11+, `-std=c11` (Phase 1), `-std=c++17` (Phase 2+)
+- **Compiler**: GCC 7+, `-std=c11` (Phase 1), `-std=c++17` (Phase 2+)
