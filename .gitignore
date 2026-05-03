@@ -2,6 +2,7 @@ build/
 *.o
 *.a
 .vscode/
+compile_commands.json
 
 # Phase 5 (Python bindings) build artifacts
 *.so
