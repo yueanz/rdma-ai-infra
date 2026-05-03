@@ -34,13 +34,22 @@ PYBIND11_MODULE(_core, m) {
                 py::buffer_info info = b.request(true);   // writable
                 auto rb = std::make_unique<RegisteredBuffer>();
                 rb->source = py::reinterpret_borrow<py::object>(b);
-                if (rb->sb.init(&t, info.ptr, info.size * info.itemsize) != 0) {
+                if (rb->sb.init(&t, info.ptr, info.size * info.itemsize) != 0)
                     throw std::runtime_error("reg_buf failed");
-                }
                 return rb;
             },
             py::arg("buf"),
             py::keep_alive<0, 1>())    // keep Transport alive while RegisteredBuffer lives
+        .def("reg_tensor",
+            [](Transport &t, uintptr_t addr, size_t nbytes, py::object source){
+                auto rb = std::make_unique<RegisteredBuffer>();
+                rb->source = source;
+                if (rb->sb.init(&t, reinterpret_cast<void*>(addr), nbytes) != 0)
+                    throw std::runtime_error("reg_tensor failed");
+                return rb;
+            },
+            py::arg("addr"), py::arg("nbytes"), py::arg("source"),
+            py::keep_alive<0,1>())
         .def("send_async",
             [](Transport &t, RegisteredBuffer &mr, size_t len, uint64_t id, size_t offset) {
                 if (t.send_async(&mr.sb.h, len, id, offset) != 0)
