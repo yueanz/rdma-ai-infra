@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rai-rdma"
+version = "0.1.0"
+description = "Python bindings for the rai_rdma Transport layer"
+requires-python = ">=3.10"
+
+# Source layout: the actual Python package lives in python/rai_rdma/.
+# CMake builds _core.<...>.so into that same directory; editable install
+# points pip at this dir so changes (including rebuilt .so) are picked up
+# without reinstall.
+[tool.setuptools.packages.find]
+where = ["python"]
+
+# Include the CMake-built .so inside the package.
+[tool.setuptools.package-data]
+rai_rdma = ["*.so"]

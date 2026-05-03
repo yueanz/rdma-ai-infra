@@ -2,3 +2,9 @@ build/
 *.o
 *.a
 .vscode/
+
+# Phase 5 (Python bindings) build artifacts
+*.so
+__pycache__/
+*.egg-info/
+.pytest_cache/
