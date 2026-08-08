@@ -1,27 +1,41 @@
+/* posix_memalign and sysconf are POSIX, not ISO C — declare the level we need
+   so this still builds if C extensions are ever turned off. */
+#define _POSIX_C_SOURCE 200112L
+
 #include "rdma_common.h"
 #include "logging.h"
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 int rai_mr_reg(rai_qp_t *qp, rai_mr_t *mr, size_t size) {
     void *buf;
 
+    if (size == 0) {
+        LOG_ERR("rai_mr_reg failed: size is 0");
+        return -1;
+    }
     if (qp == NULL || qp->pd == NULL) {
         LOG_ERR("rai_mr_reg failed: qp or qp->pd is null");
         return -1;
     }
     if (mr == NULL) {
-        LOG_ERR("rdma memory region is null");
+        LOG_ERR("rai_mr_reg failed: mr is null");
         return -1;
     }
-    buf = malloc(size);
-    if (buf == NULL) {
-        LOG_ERR("failed to allocate memory");
+    /* Page-align so a registration never straddles an extra page, and so the
+     * alignment is the same on every run rather than whatever the heap hands
+     * back — otherwise it is an uncontrolled variable across benchmarks. */
+    long pagesize = sysconf(_SC_PAGESIZE);
+    if (pagesize <= 0)
+        pagesize = 4096;
+    if (posix_memalign(&buf, (size_t)pagesize, size) != 0) {
+        LOG_ERR("rai_mr_reg failed: posix_memalign failed");
         return -1;
     }
     mr->mr = ibv_reg_mr(qp->pd, buf, size, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);
     if (mr->mr == NULL) {
-        LOG_ERR("failed to register memory region");
+        LOG_ERR("rai_mr_reg failed: ibv_reg_mr failed");
         free(buf);
         return -1;
     }

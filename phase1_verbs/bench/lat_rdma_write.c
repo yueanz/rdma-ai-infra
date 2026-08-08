@@ -32,6 +32,9 @@ int main(int argc, char *argv[]) {
             LOG_ERR("rai_mr_reg failed");
             goto out;
         }
+        /* Clear the doorbell while the QP is still in INIT. The buffer comes
+         * from malloc, and a stale byte here would read as an arrival. */
+        ((uint8_t *)mr.buf)[cfg.size - 1] = 0;
         if (bench_accept(&qp, &cfg) != 0) {
             LOG_ERR("accept failed");
             goto out;
@@ -63,15 +66,27 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    /* The last byte of the payload doubles as a doorbell carrying the
+     * iteration number. The receiver never writes it — it waits for its own
+     * next expected value, so there is no reset to race with the sender's
+     * following write. Truncating to 8 bits is safe because the sender waits
+     * for each completion and so can never run 256 iterations ahead.
+     *
+     * Polling the *last* byte works because an RC RDMA write lands in
+     * increasing address order: packets are delivered in PSN order and the
+     * HCA's DMA writes are not reordered on the bus. Adaptive routing or
+     * relaxed-ordering MRs weaken that, and then the doorbell has to be
+     * replaced by a trailing RDMA_WRITE_WITH_IMM so the receiver gets a real
+     * completion instead (this is what NCCL does). Neither applies to a
+     * single-QP back-to-back link with no switch in between. */
     int total_iters = kWarmup + cfg.iters;
+    doorbell = (uint8_t *)mr.buf + cfg.size - 1;
     if (cfg.server_ip == NULL) {
         // server side
-        doorbell = (uint8_t *)mr.buf + cfg.size - 1;
-        *doorbell = 0;
         for (i = 0; i < total_iters; i++) {
-            while (*doorbell == 0)
+            uint8_t expect = (uint8_t)(i + 1);
+            while (*doorbell != expect)
                 CPU_RELAX();
-            *doorbell = 0;
         }
     } else {
         // client side
@@ -81,9 +96,8 @@ int main(int argc, char *argv[]) {
             goto out;
         }
 
-        doorbell = (uint8_t *)mr.buf + cfg.size - 1;
         for (i = 0; i < total_iters; i++) {
-            *doorbell = 1;
+            *doorbell = (uint8_t)(i + 1);
             iter_start = time_now_ns();
             if (rai_post_write(&qp, &mr, cfg.size, IBV_SEND_SIGNALED,
                             qp.remote.addr, qp.remote.rkey, 1, 0) != 0) {

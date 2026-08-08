@@ -46,12 +46,8 @@ static inline int bench_config_parse(int argc, char *argv[], bench_config_t *cfg
             cfg->server_ip = argv[i];
             continue;
         }
-        if (strcmp(opt, "--port")  != 0 && strcmp(opt, "--iters") != 0 &&
-            strcmp(opt, "--size")  != 0 && strcmp(opt, "--depth") != 0 &&
-            strcmp(opt, "--conn")  != 0) {
-            printf("unknown option: %s\n", opt);
-            return -1;
-        }
+        /* Every option below takes exactly one value, so consume it up front
+         * and let the dispatch be the single place each option is named. */
         if (i + 1 >= argc) {
             printf("missing value after %s\n", opt);
             return -1;
@@ -66,7 +62,7 @@ static inline int bench_config_parse(int argc, char *argv[], bench_config_t *cfg
             cfg->size = atoi(val);
         } else if (strcmp(opt, "--depth") == 0) {
             cfg->depth = atoi(val);
-        } else {   /* --conn, by elimination */
+        } else if (strcmp(opt, "--conn") == 0) {
             if (strcmp(val, "cm") == 0) {
                 cfg->conn = RAI_CONN_CM;
             } else if (strcmp(val, "verbs") == 0) {
@@ -75,6 +71,9 @@ static inline int bench_config_parse(int argc, char *argv[], bench_config_t *cfg
                 printf("unknown --conn value: %s (want cm or verbs)\n", val);
                 return -1;
             }
+        } else {
+            printf("unknown option: %s\n", opt);
+            return -1;
         }
     }
 
