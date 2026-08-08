@@ -5,6 +5,10 @@
 extern "C" {
 #endif
 
+/* Send/recv queue depth every QP is created with. Caps how many WRs a caller
+ * can keep in flight before it must reap completions. */
+#define RAI_QP_MAX_WR 128
+
 /*
  * How the connection is established. The data path (post_send/recv/write/read,
  * poll_cq) is identical in both modes — only setup differs. CM is 0 so a

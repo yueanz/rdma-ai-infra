@@ -5,82 +5,26 @@
 #include "rdma_common.h"
 #include "timing.h"
 #include "bench_utils.h"
+#include "bench_config.h"
 #include "logging.h"
-
-typedef struct config {
-    char *server_ip;  /* NULL = server mode, non-NULL = client mode */
-    int port;
-    int iters;
-    int size;
-} config_t;
-
-static void config_init(config_t *cfg) {
-    cfg->server_ip = NULL;
-    cfg->port = 12345;
-    cfg->iters = 1000;
-    cfg->size = 4096;
-}
-
-static int config_parse(int argc, char *argv[], config_t *cfg) {
-    int i;
-    for (i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--port") == 0) {
-            if (i + 1 >= argc) {
-                printf("missing value after --port\n");
-                return -1;
-            }
-            cfg->port = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--iters") == 0) {
-            if (i + 1 >= argc) {
-                printf("missing value after --iters\n");
-                return -1;
-            }
-            cfg->iters = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--size") == 0) {
-            if (i + 1 >= argc) {
-                printf("missing value after --size\n");
-                return -1;
-            }
-            cfg->size = atoi(argv[++i]);
-        } else if (argv[i][0] != '-') {
-            cfg->server_ip = argv[i];
-        } else {
-            printf("unknown option: %s\n", argv[i]);
-            return -1;
-        }
-    }
-    return 0;
-}
-
-static void config_usage(const char *prog) {
-    printf("Usage:\n");
-    printf("  %s [--port <port>] [--iters <n>] [--size <bytes>]\n", prog);
-    printf("  %s <server_ip> [--port <port>] [--iters <n>] [--size <bytes>]\n", prog);
-}
-
-static int cmp_u64(const void *a, const void *b) {
-    uint64_t x = *(const uint64_t*)a;
-    uint64_t y = *(const uint64_t*)b;
-    return (x>y) - (x<y);
-}
 
 int main(int argc, char *argv[]) {
     int ret = 1, i;
     uint64_t iter_start;
-    config_t cfg;
+    bench_config_t cfg;
     rai_mr_t mr = {0};
     rai_qp_t qp = {0};
     uint64_t *latencies = NULL;
 
-    config_init(&cfg);
-    if (config_parse(argc, argv, &cfg) != 0) {
-        config_usage(argv[0]);
+    bench_config_init(&cfg);
+    if (bench_config_parse(argc, argv, &cfg) != 0) {
+        bench_config_usage(argv[0]);
         goto out;
     }
 
     if (cfg.server_ip == NULL) {
-        if (rai_cm_listen_qp(&qp, cfg.port, NULL) != 0) {
-            LOG_ERR("rai_cm_listen_qp failed");
+        if (bench_listen(&qp, &cfg, NULL) != 0) {
+            LOG_ERR("listen failed");
             goto out;
         }
         if (rai_mr_reg(&qp, &mr, cfg.size) != 0) {
@@ -93,13 +37,13 @@ int main(int argc, char *argv[]) {
             LOG_ERR("rai_post_recv (pre-post) failed");
             goto out;
         }
-        if (rai_cm_accept_qp(&qp) != 0) {
-            LOG_ERR("rai_cm_accept_qp failed");
+        if (bench_accept(&qp, &cfg) != 0) {
+            LOG_ERR("accept failed");
             goto out;
         }
     } else {
-        if (rai_cm_connect_qp(&qp, cfg.server_ip, cfg.port) != 0) {
-            LOG_ERR("rai_cm_connect_qp failed");
+        if (bench_connect(&qp, &cfg) != 0) {
+            LOG_ERR("connect failed");
             goto out;
         }
         if (rai_mr_reg(&qp, &mr, cfg.size) != 0) {
@@ -148,12 +92,12 @@ int main(int argc, char *argv[]) {
                 LOG_ERR("rdma post send failed");
                 goto out;
             }
-            // send completed
+            /* Send and recv share one CQ, so these two completions can
+             * arrive in either order. Only their total matters here. */
             if (rai_poll_cq(&qp, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;
             }
-            // recv completed
             if (rai_poll_cq(&qp, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
                 goto out;

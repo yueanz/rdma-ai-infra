@@ -5,6 +5,13 @@
 
 #define kWarmup 20
 
+/* qsort comparator for the latency samples print_latency expects sorted. */
+static inline int cmp_u64(const void *a, const void *b) {
+    uint64_t x = *(const uint64_t*)a;
+    uint64_t y = *(const uint64_t*)b;
+    return (x > y) - (x < y);
+}
+
 /* Print latency results. samples must be sorted ascending.
  *
  * Percentile indexing: for percentile p of n samples, the 0-indexed

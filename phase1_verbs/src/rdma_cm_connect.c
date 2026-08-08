@@ -22,7 +22,7 @@ static int build_qp_from_cm(rai_qp_t *qp, struct rdma_cm_id *id)
 
     struct ibv_qp_init_attr attr = {
         .send_cq = qp->cq, .recv_cq = qp->cq, .qp_type = IBV_QPT_RC,
-        .cap = { .max_send_wr = 128, .max_recv_wr = 128,
+        .cap = { .max_send_wr = RAI_QP_MAX_WR, .max_recv_wr = RAI_QP_MAX_WR,
                  .max_send_sge = 1, .max_recv_sge = 1 },
     };
     if (rdma_create_qp(id, qp->pd, &attr) != 0) {

@@ -195,6 +195,21 @@ sudo ip netns exec ns1 ./bw_rdma_write --size 65536
 sudo ip netns exec ns2 ./bw_rdma_write 192.168.100.1 --size 65536 --iters 1000 --depth 16
 ```
 
+**Connection setup mode.** Every Phase 1 benchmark takes `--conn cm|verbs`
+(default `cm`), selecting how the QP is brought up — `librdmacm`, or raw verbs
+walking INIT → RTR → RTS by hand. Both sides must agree. The data path is the
+same code either way, so a matched pair of runs isolates the cost of connection
+setup itself:
+
+```bash
+sudo ip netns exec ns1 ./lat_send_recv --conn verbs
+sudo ip netns exec ns2 ./lat_send_recv 192.168.100.1 --conn verbs
+```
+
+The raw verbs path is RoCE v2 only, picks its GID index by scanning the port's
+GID table, and auto-selects the single RDMA device visible in its namespace
+(override with `RDMA_DEVICE=<dev>`).
+
 ### Phase 2 — Transport abstraction (RDMA vs TCP)
 
 ```bash

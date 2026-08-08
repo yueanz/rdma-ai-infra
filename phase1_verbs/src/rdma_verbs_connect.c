@@ -93,8 +93,8 @@ static int build_qp_verbs(rai_qp_t *qp) {
     init_attr.send_cq = qp->cq;
     init_attr.recv_cq = qp->cq;
     init_attr.qp_type = IBV_QPT_RC;
-    init_attr.cap.max_send_wr  = 128;
-    init_attr.cap.max_recv_wr  = 128;
+    init_attr.cap.max_send_wr  = RAI_QP_MAX_WR;
+    init_attr.cap.max_recv_wr  = RAI_QP_MAX_WR;
     init_attr.cap.max_send_sge = 1;
     init_attr.cap.max_recv_sge = 1;
     qp->qp = ibv_create_qp(qp->pd, &init_attr);
