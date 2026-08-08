@@ -90,6 +90,12 @@ int rai_oob_connect(rai_qp_t *qp, const char *server_ip, int port);
 int rai_cm_listen_qp(rai_qp_t *qp, int port, int *mr_listen_fd);
 int rai_cm_accept_qp(rai_qp_t *qp);
 int rai_cm_connect_qp(rai_qp_t *qp, const char *server_ip, int port);
+/* raw verbs flow: same shape as the rdma_cm one above, but qpn/psn/gid are
+   exchanged over OOB TCP on `port` before listen/connect returns, and the
+   INIT → RTR → RTS transitions are done by hand. RoCE v2 only. */
+int rai_verbs_listen_qp(rai_qp_t *qp, int port, int *mr_listen_fd);
+int rai_verbs_accept_qp(rai_qp_t *qp);
+int rai_verbs_connect_qp(rai_qp_t *qp, const char *server_ip, int port);
 int rai_post_send(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint64_t id, size_t offset);
 int rai_post_recv(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint64_t id, size_t offset);
 int rai_post_write(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint32_t send_flags,

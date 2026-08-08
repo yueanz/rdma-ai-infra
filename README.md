@@ -99,8 +99,9 @@ rdma-ai-infra/
 │   │   ├── rdma_qp.c                # rai_qp_destroy (idempotent teardown)
 │   │   ├── rdma_mr.c                # MR register / deregister
 │   │   ├── rdma_ops.c               # post_send / post_recv / post_write / post_read / poll_cq
-│   │   ├── rdma_cm_connect.c        # rdma_cm-based connect (server/client/listen/accept)
-│   │   └── rdma_connect.c           # rai_oob_listen / accept / connect (TCP for MR exchange)
+│   │   ├── rdma_cm_connect.c        # rdma_cm-based connect (listen/accept/connect)
+│   │   ├── rdma_verbs_connect.c     # raw verbs connect (manual INIT→RTR→RTS, RoCE v2)
+│   │   └── rdma_oob_connect.c       # rai_oob_listen / accept / connect (TCP side-channel)
 │   └── bench/
 │       ├── lat_send_recv.c          # two-sided ping-pong latency
 │       ├── lat_rdma_write.c         # one-sided write latency

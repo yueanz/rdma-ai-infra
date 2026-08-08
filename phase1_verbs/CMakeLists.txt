@@ -7,8 +7,9 @@ set(COMMON_INC ${CMAKE_SOURCE_DIR}/common/include)
 add_library(rdma_verbs STATIC
     src/rdma_mr.c
     src/rdma_qp.c
-    src/rdma_connect.c
+    src/rdma_oob_connect.c
     src/rdma_cm_connect.c
+    src/rdma_verbs_connect.c
     src/rdma_ops.c
 )
 target_include_directories(rdma_verbs PUBLIC include ${COMMON_INC})
