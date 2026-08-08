@@ -5,7 +5,7 @@ build/
 compile_commands.json
 external/
 
-# Phase 5 (Python bindings) build artifacts
+# python_bindings/ build artifacts
 *.so
 __pycache__/
 *.egg-info/

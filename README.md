@@ -4,171 +4,82 @@ A from-scratch implementation of RDMA communication primitives, transport abstra
 
 Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), implementing two end-to-end workloads from raw verbs upward: a mini NCCL-style ring all-reduce and a vLLM-style remote KV cache (prefill via RDMA write, decode via RDMA read).
 
+Tested on a real RDMA home lab: two ConnectX-4 NICs, RoCEv2, bare metal, connected back-to-back and isolated into separate network namespaces so each port behaves like an independent host.
+
 ## Phase Status
 
-- [x] **Phase 1** — RDMA Verbs Foundation (RC QP, MR, CQ, send/recv, RDMA write, benchmarks). Uses `rdma_cm` for connection setup — Alibaba eRDMA (iWARP), the production target, rejects manual `ibv_modify_qp` state transitions. Migration retrospective: [`docs/raw-verbs-evolution.md`](docs/raw-verbs-evolution.md).
+- [x] **Phase 1** — RDMA Verbs Foundation (RC QP, MR, CQ, send/recv, RDMA write, benchmarks). Uses `rdma_cm` for connection setup — some RDMA fabrics (e.g. iWARP) reject manual `ibv_modify_qp` state transitions, so this project standardizes on `rdma_cm` across all backends. Migration retrospective: [`docs/raw-verbs-evolution.md`](docs/raw-verbs-evolution.md).
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends via rdma_cm, send/recv + write benchmarks; TCP write omitted — no one-sided primitive)
-- [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, RDMA + TCP backends benchmarked on eRDMA two-machine setup)
+- [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, RDMA + TCP backends)
 - [x] **Phase 4** — Remote KV Cache (slab allocator over single MR, ctrl/data plane separation, prefill via RDMA write, decode via RDMA read)
-- [ ] **Phase 5** — vLLM KVTransferAgent Integration (planned). Scope: pybind11 binding for the Transport layer, an `RdmaKVConnector` implementing vLLM's `KVConnectorBase_V1` interface, CPU tensor path as the first integration target, GPUDirect on future hardware.
+- [ ] **Phase 5** — Bare-metal RoCEv2 benchmark (in progress). Re-running the Phase 1–4 benchmarks on real ConnectX-4 hardware over RoCEv2.
 
-## Benchmark Results
+## Hardware & Test Environment
 
-> All numbers below built with `-DCMAKE_BUILD_TYPE=RelWithDebInfo` (the project default; `-O2 -g -DNDEBUG`).
->
-> Phase 1 was run twice on the same Alibaba Cloud ECS pair — once with eRDMA (hardware RDMA), once with SoftRoCE (software RDMA over UDP, `rdma_rxe`). Same machines, same code, different RDMA device.
+### Hardware
 
-### Phase 1 — eRDMA (Alibaba Cloud ECS, two machines)
+| | |
+|---|---|
+| ![Chassis before install](pictures/01-chassis-before-install.jpg) | Chassis opened, bare motherboard — before installing RAM or NICs. |
+| ![Case panel electrical overview](pictures/02-case-panel-electrical-overview.jpg) | The side panel doubles as a wiring diagram — header/slot layout reference. |
+| ![ConnectX-4 NICs unboxed](pictures/03-connectx4-nics-unboxed.jpg) | Two Mellanox ConnectX-4 100GbE NICs, still in anti-static trays. |
+| ![ConnectX-4 installed, wide](pictures/04-connectx4-installed-wide.jpg) | Both ConnectX-4 cards seated in PCIe slots. |
+| ![ConnectX-4 installed, top](pictures/05-connectx4-installed-top.jpg) | Same state, top-down angle. |
+| ![QSFP28 DAC cable](pictures/06-qsfp-dac-cable.jpg) | QSFP28 DAC cable — connects the two ports back-to-back, no switch in the loop. |
 
-| Benchmark | Min | Median | p99 | Max |
-|---|---|---|---|---|
-| `lat_send_recv` (RTT) | 38.30 μs | 39.93 μs | 44.96 μs | 52.59 μs |
-| `lat_rdma_write` (one-sided) | 30.32 μs | 31.46 μs | 36.24 μs | 42.41 μs |
+### RoCEv2 Bring-Up + Network Namespace Isolation
 
-| Benchmark | Config | Throughput |
-|---|---|---|
-| `bw_rdma_write` | 1 MB × 100 iters, depth=1 (burst) | 9.06 GiB/s / 77.83 Gbps |
-| `bw_rdma_write` | 1 MB × 1000 iters, depth=1 (sustained) | 3.30 GiB/s / 28.37 Gbps |
+Both ConnectX-4 ports are wired directly to each other. To make this single host behave like two independent hosts for testing (and avoid ARP flux / `rp_filter` drops that come from having two NICs on the same L2 segment in one namespace), each device is moved into its own network namespace.
 
-64 KB depth sweep (1000 iters):
+`scripts/setup_netns.sh` automates the steps below and is safe to re-run:
 
-| depth | eRDMA | SoftRoCE |
-|---|---|---|
-| 1 | 1.63 GiB/s / 13.98 Gbps | 0.90 GiB/s / 7.71 Gbps |
-| 2 | 3.01 GiB/s / 25.82 Gbps | 1.27 GiB/s / 10.91 Gbps |
-| 4 | 4.71 GiB/s / 40.44 Gbps | 1.65 GiB/s / 14.17 Gbps |
-| 8 | 5.74 GiB/s / 49.33 Gbps | — (UDP buffer overflow) |
-| 16 | 6.72 GiB/s / 57.76 Gbps | — |
-| 32 | WR_FLUSH_ERR | — |
+```bash
+sudo bash scripts/setup_netns.sh
+```
 
-**Key insights:**
-- RDMA write is ~21% lower latency than send/recv (median: 31 vs 40 μs) — one-sided ops bypass server-side CPU entirely
-- Burst vs sustained throughput gap (78 → 28 Gbps) reflects Alibaba Cloud eRDMA fabric QoS: short transfers run at line rate, sustained transfers are throttled to a committed rate
-- eRDMA throughput scales near-linearly to depth=8, then diminishing returns as depth=16 saturates the NIC (~58 Gbps); depth=32 errors out with `WR_FLUSH_ERR` — a fabric-level ceiling, not the QP's `max_send_wr` (set to 128 in `rdma_cm_connect.c`).
-- SoftRoCE caps out at depth=4 (14 Gbps); depth≥8 triggers UDP buffer overflow — 65 KB × 8 in-flight = 128 concurrent UDP packets exceeds the kernel receive buffer; eRDMA at depth=4 (40 Gbps) already outperforms SoftRoCE's ceiling
+Manual walkthrough:
 
-### Phase 1 — SoftRoCE (Alibaba Cloud ECS, two machines)
+```bash
+# 1. Confirm physical link is up
+rdma link
+# link mlx5_0/1 state ACTIVE physical_state LINK_UP netdev ens2np0
+# link mlx5_1/1 state ACTIVE physical_state LINK_UP netdev ens4np0
 
-Same physical machines as above; eRDMA unloaded (`modprobe -r erdma`), SoftRoCE loaded on the same NIC (`rdma link add rxe0 type rxe netdev eth0`). Differences reflect software vs hardware RDMA only.
+# 2. Confirm RoCEv2 GID (not just the auto-generated IPv6 link-local RoCEv1 entry)
+for dev in mlx5_0 mlx5_1; do
+  for f in /sys/class/infiniband/$dev/ports/1/gids/*; do
+    gid=$(cat "$f")
+    [ "$gid" != "0000:0000:0000:0000:0000:0000:0000:0000" ] && \
+      echo "$dev idx=$(basename "$f") gid=$gid type=$(cat "${f/gids/gid_attrs\/types}")"
+  done
+done
+# idx=1 ... type=RoCE v2   <- this is the GID index perftest's -x should use
 
-| Benchmark | Min | Median | p99 | Max |
-|---|---|---|---|---|
-| `lat_send_recv` (RTT) | 41.21 μs | 46.72 μs | 53.49 μs | 61.97 μs |
-| `lat_rdma_write` (one-sided) | 39.31 μs | 40.06 μs | 43.25 μs | 50.69 μs |
+# 3. Switch to netns-exclusive mode (one-way on some kernels — do this before anything binds the devices)
+sudo rdma system set netns exclusive
 
-**Key insights:**
-- eRDMA is ~22% lower latency than SoftRoCE (RDMA write median: 31 vs 40 μs) on the same hardware
-- 1 MB writes fail on SoftRoCE (`transport retry counter exceeded`) due to UDP fragmentation; 64 KB is the practical ceiling for rdma_rxe
-- See depth sweep table in the eRDMA section above for full throughput comparison
+# 4. Create two namespaces and hand one device to each
+sudo ip netns add ns1
+sudo ip netns add ns2
+sudo rdma dev set mlx5_0 netns ns1
+sudo rdma dev set mlx5_1 netns ns2
 
-### Phase 2 — backend_compare (Alibaba Cloud ECS, eRDMA, two machines)
+# 5. Verify isolation — each namespace should see exactly one device, root netns should see none
+sudo ip netns exec ns1 rdma dev show   # 0: mlx5_0 ...
+sudo ip netns exec ns2 rdma dev show   # 1: mlx5_1 ...
+sudo rdma dev show                     # (empty)
 
-Compares RDMA backend (rdma_cm + libibverbs) against TCP backend across send/recv and write semantics, at multiple message sizes.
+# 6. Assign IPs and bring interfaces up inside each namespace
+sudo ip netns exec ns1 ip addr add 192.168.100.1/24 dev ens2np0
+sudo ip netns exec ns1 ip link set ens2np0 up
+sudo ip netns exec ns1 ip link set lo up
 
-> **Note**: Phase 2's RDMA backend originally used raw verbs OOB handshake. eRDMA (iWARP-based) rejects manual `ibv_modify_qp` state transitions, so the backend was migrated to rdma_cm — see [`docs/raw-verbs-evolution.md`](docs/raw-verbs-evolution.md) for the migration retrospective. The migrated path is what's measured below.
+sudo ip netns exec ns2 ip addr add 192.168.100.2/24 dev ens4np0
+sudo ip netns exec ns2 ip link set ens4np0 up
+sudo ip netns exec ns2 ip link set lo up
+```
 
-**send/recv latency (RTT, two-sided echo)**
-
-| Backend | Size | Min | Median | p99 | Max | Throughput |
-|---|---|---|---|---|---|---|
-| RDMA | 4 KB | 23.42 | 25.10 | **87,806** | 90,814 | 0.01 Gbps |
-| RDMA | 64 KB | 31.91 | 34.17 | 87.56† | 45,655 | 2.02 Gbps |
-| RDMA | 1 MB | 119.78 | 181.25 | 617.90 | 45,550 | 23.34 Gbps |
-| TCP | 4 KB | 28.70 | 30.26 | 37.89 | 45.61 | 1.07 Gbps |
-| TCP | 64 KB | 84.75 | 105.99 | 115.66 | 127.46 | 4.93 Gbps |
-| TCP | 1 MB | 185.34 | 198.42 | 286.02 | 4,211 | **37.84 Gbps** |
-
-† RDMA send/recv p99 is **bimodal**: clean (~87 µs) when polling stays scheduled, spikes to tens of ms (max column) when shared-VM CPU scheduling preempts the server's user-space CQ polling loop. Same root cause as the tail jitter analyzed in Phase 3's "On the jitter" section — *not* RNR retry (the observed outliers don't match the 491 ms / retry quantum of `min_rnr_timer = 31`). Run-to-run variance is huge — same code, same environment.
-
-**RDMA write latency (one-sided, no server CPU involvement)**
-
-| Size | Min | Median | p99 | Max | Throughput |
-|---|---|---|---|---|---|
-| 4 KB | 16.87 | 18.11 | 22.16 | 25.35 | 1.82 Gbps |
-| 64 KB | 21.32 | 23.29 | 31.13 | 64.20 | **22.36 Gbps** |
-| 1 MB | 119.96 | 321.37 | 426.59 | 1,827 | 25.85 Gbps |
-
-> TCP write is omitted: TCP has no one-sided primitive — any emulation either measures syscall time (completion ≠ remote received) or degenerates into 2-sided send/recv with explicit ACK.
-
-**Key insights:**
-
-- **At 4 KB (small messages)**: RDMA write median 18 µs vs TCP send/recv 30 µs — **RDMA wins on latency** by 40%, and write is even faster than RDMA send/recv (one-sided skips server CPU).
-- **At 64 KB (medium)**: RDMA write 22 Gbps vs RDMA send/recv 2 Gbps — **same payload size, 11× gap from operation choice alone**. The send/recv throughput collapses because the polling-preempt tail (see footnote on the latency table) drags the average into milliseconds. RDMA write is immune — server CPU is not involved, so no polling loop to preempt.
-- **At 1 MB (large)**: TCP send/recv (37.84 Gbps) **outperforms** all RDMA modes (~25 Gbps). Reason: Alibaba eRDMA fabric applies QoS shaping to RDMA traffic at ~25–28 Gbps sustained (matches Phase 1 `bw_rdma_write` 28 Gbps sustained), while TCP traffic is shaped on a different policy.
-- **Practical takeaway for LLM inference (KV cache transfer)**: chunk transfers to ≤64 KB, use RDMA write — avoids both the cloud QoS shaping and the polling-preempt tail on send/recv. Phase 4's `KVPool` design is built on this principle.
-
-### Phase 3 — Ring All-Reduce (Alibaba Cloud ECS, eRDMA, two machines)
-
-`ring_allreduce` measured at 5 sizes spanning ~3 orders of magnitude (4 KB to 10 MB; 2,560× ratio). RDMA wins on median at every size; the tail tells a more interesting story.
-
-| count (floats) | bytes | RDMA median | RDMA p99 | TCP median | TCP p99 | Speedup (median) |
-|---|---|---|---|---|---|---|
-| 1,024 | 4 KB | 38 μs | 47 μs | 62 μs | 70 μs | 1.64× |
-| 4,096 | 16 KB | 42 μs | 91 ms † | 77 μs | 83 μs | 1.83× |
-| 65,536 | 256 KB | 102 μs | 235 μs | 241 μs | 264 μs | **2.37×** |
-| 262,144 | 1 MB | 252 μs | 51 ms † | 318 μs | 332 μs | 1.26× |
-| 2,621,440 | 10 MB | 2,009 μs ‡ | 3–48 ms § | 2,385 μs | 3,073 μs | 1.19× |
-
-† RDMA p99 ≈ max → cluster of 2–3 consecutive bad iters in the tail (cloud-VM scheduling pause).
-‡ RDMA 10 MB has high run-to-run variance (5 runs span 1,379–2,384 μs); reported value is cross-run median. TCP at 10 MB shows < 4% spread across runs.
-§ Within a single run, p99 swings between ~3 ms (jitter-cluster-free) and ~48 ms (cluster hit).
-
-**Three-regime pattern:**
-
-- **Small messages (4–16 KB)**: RDMA's median advantage is ~1.7× — kernel-bypass saves the per-iter syscall cost. But the tail is fully dominated by jitter: per-iter work (~40 μs) is so small that any hypervisor preempt (tens of ms) ends up sitting on top of it.
-- **Sweet spot (256 KB)**: both backends' tails are clean. Per-iter work (~100 μs) is large enough to amortize over the polling loop, but still under eRDMA's bandwidth cap. RDMA gets its biggest relative edge here (**2.37×**).
-- **Bandwidth-bound (1–10 MB)**: RDMA's median edge holds at ~1.2× — eRDMA's QoS shapes sustained traffic to ~28 Gbps (matches Phase 1's `bw_rdma_write` ceiling), and TCP runs near line speed too. Jitter clusters reappear at 10 MB.
-
-**On the jitter:**
-
-At 4 KB / 16 KB / 10 MB, **p99 ≈ max**, meaning ≥2 consecutive iters land in the tail — a single hypervisor preempt event taking out a small cluster. At 256 KB / 1 MB the tail is mostly isolated single outliers. **Root cause is shared-VM CPU scheduling**: RDMA send/recv uses user-space CQ polling, so a vCPU preempt stalls the loop directly; TCP send/recv blocks in the kernel and gets re-scheduled. Not RNR retry — `min_rnr_timer = 31` would be 491 ms per retry, doesn't fit.
-
-**On run-to-run variance**: at 10 MB, 5 RDMA runs landed at 1,379 / 1,664 / 2,009 / 2,271 / 2,384 μs (~70% spread). TCP at the same size: 2,350 / 2,385 / 2,445 μs (~4% spread). Single-run RDMA medians at large sizes aren't reliable as portfolio numbers — cross-run sampling matters. The same 70% spread is presumably present at smaller sizes but the absolute drift is masked by the lower per-iter cost.
-
-**No TCP crossover** like Phase 2 backend_compare 1 MB showed. Ring all-reduce chunks the buffer into `count/N` pieces (5 MB at N=2 for 10 MB total) and the per-WR transfer bursts at NIC line rate; eRDMA's 28 Gbps QoS only shapes *sustained* streams (Phase 1's back-to-back 1,000-iter `bw_rdma_write`), not the gappy 1-iter-at-a-time pattern in ring all-reduce.
-
-**The fix that made all this work**: `ring_allreduce` initially registered 3 MRs per call (`ScopedBuffer` inside the function). On eRDMA, `ibv_reg_mr` is ~10 ms, so each iteration spent ~30 ms in registration alone. Refactored to NCCL-style: caller pre-registers MRs once before the timed loop and passes `BufferHandle*` into `ring_allreduce`. Per-iter cost dropped from ~30 ms to ~50 μs (**600× faster**). Pre-fix, RDMA was ~540× *slower* than TCP at small sizes; post-fix, RDMA is ~2× *faster* than TCP — the bug effectively flipped the sign of the comparison.
-
-> Production lesson: RDMA's user-space polling model is sensitive to OS scheduling jitter. NCCL/UCX deployments isolate CPU cores (`isolcpus`, cgroup pinning) or run on bare metal to avoid this. On shared cloud VMs the jitter is fundamental — visible only in the tail, but visible.
-
-### Phase 4 — Remote KV Cache (Alibaba Cloud ECS, eRDMA, two machines)
-
-`kv_bench` measured at 5 slot sizes spanning the typical vLLM KV-block range (4 KB → 1 MB).
-
-**prefill (RDMA write to remote slot)**
-
-| slot_size | Min | Median | p99 | Max | Throughput |
-|---|---|---|---|---|---|
-| 4 KB | 16.93 μs | **17.77 μs** | 22.58 μs | 33.19 μs | 1.81 Gbps |
-| 16 KB | 18.14 μs | **19.16 μs** | 23.73 μs | 27.69 μs | 6.70 Gbps |
-| 64 KB | 22.05 μs | **23.61 μs** | 28.56 μs | 34.66 μs | 22.12 Gbps |
-| 256 KB | 29.43 μs | **31.53 μs** | 149.97 μs | 1185.74 μs | **41.20 Gbps** ⬆ peak |
-| 1 MB | 64.15 μs | **314.02 μs** | 426.93 μs | 5503.09 μs | 28.23 Gbps |
-
-**decode (RDMA read from remote slot)**
-
-| slot_size | Min | Median | p99 | Max | Throughput |
-|---|---|---|---|---|---|
-| 4 KB | 18.28 μs | **20.21 μs** | 24.05 μs | 67.92 μs | 1.62 Gbps |
-| 16 KB | 19.46 μs | **21.42 μs** | 24.50 μs | 29.02 μs | 6.10 Gbps |
-| 64 KB | 22.88 μs | **24.67 μs** | 30.42 μs | 208.30 μs | 20.90 Gbps |
-| 256 KB | 31.02 μs | **33.15 μs** | 142.76 μs | 1317.69 μs | 41.21 Gbps |
-| 1 MB | 98.83 μs | **313.90 μs** | 435.00 μs | 4532.94 μs | 28.24 Gbps |
-
-**Key insights:**
-
-- **Three regimes in the scaling curve**:
-  - **4–64 KB (latency-bound)**: median almost constant (18→23 μs), throughput scales near-linearly. Protocol overhead dominates, not bandwidth.
-  - **64–256 KB (bandwidth-bound)**: throughput peaks at ~41 Gbps, hitting the eRDMA NIC's per-stream ceiling.
-  - **1 MB (QoS-shaped)**: throughput drops back to **28.24 Gbps** — exactly matching Phase 1's `bw_rdma_write` 1 MB sustained (28.37 Gbps) and Phase 2's RDMA write (25.85 Gbps). This is Alibaba eRDMA's sustained-rate QoS shaping, **not** a Phase 4 limitation.
-
-- **`KVPool` abstraction is zero-overhead**: at every size, `kv_bench` matches the raw RDMA numbers from Phase 1/2 within noise. The slab allocator + single pre-registered MR doesn't add a single μs to the data path.
-
-- **RDMA read ≈ RDMA write**: decode is 0–14% slower than prefill, with the gap largest at small sizes (where one extra fetch round-trip is a meaningful fraction of total time) and shrinking to near-zero at 1 MB (bandwidth-bound, both sides hit the same fabric ceiling).
-
-- **Clean tail at small sizes** (p99 ≤ 30 μs at ≤64 KB): unlike Phase 2/3 where `send/recv` showed 40–90 ms outliers from cloud-VM scheduling, Phase 4's one-sided write/read **doesn't involve the server's CPU** at all — server is just a passive doorbell target. Max occasionally spikes (e.g. 64 KB decode hit 208 μs from a single iter), but the spikes stay isolated and never cluster — p99 is the reliable description. **p99 jitter ramps up at ≥256 KB** (p99 ~150 μs at 256 KB, ~430 μs at 1 MB; max 1–5 ms across both) where transfers take long enough for cloud-fabric variance to show.
-
-> **vLLM block size context**: a typical vLLM **per-layer** KV block (16 tokens × Llama-7B FP16) is ~256 KB; bigger block sizes or non-GQA models with wider attention can push per-layer blocks past 1 MB. Phase 4's 256 KB result (31 μs median, 41 Gbps) is the sweet spot — small enough to dodge the QoS shaping, large enough to amortize per-op overhead. The decode path uses RDMA read so the consumer can pull blocks from the producer without the producer's CPU involvement, matching vLLM's disaggregated prefill/decode topology.
+With this in place, `ns1` and `ns2` behave like two separate machines connected over RoCEv2 — benchmarks run with `sudo ip netns exec ns1 <binary> ...` / `sudo ip netns exec ns2 <binary> ... 192.168.100.1`.
 
 ## Architecture
 
@@ -224,8 +135,16 @@ rdma-ai-infra/
 │   └── bench/
 │       └── kv_bench.cpp             # prefill (RDMA write) + decode (RDMA read) benchmark
 │
+├── python_bindings/                 # pybind11, opt-in (-DBUILD_PYBIND=ON, default ON)
+│   ├── bindings/
+│   │   └── transport_py.cpp         # wraps Phase 2's Transport (send/recv/read/write/poll)
+│   ├── python/rai_rdma/
+│   │   └── __init__.py              # register() — torch.Tensor-aware buffer registration
+│   └── examples/                    # echo client/server, torch.Tensor transport demos
+│
 ├── scripts/
-│   └── setup.sh                     # apt install + SoftRoCE setup + build
+│   ├── setup.sh                     # apt install + SoftRoCE setup + build
+│   └── setup_netns.sh               # idempotent ns1/ns2 RDMA isolation (see Hardware & Test Environment)
 │
 ├── CMakeLists.txt
 └── README.md
@@ -244,7 +163,7 @@ bash scripts/setup.sh
 ```bash
 sudo apt install build-essential cmake libibverbs-dev librdmacm-dev ibverbs-utils rdma-core
 
-# Optional: SoftRoCE for development (production target is Alibaba eRDMA)
+# Optional: SoftRoCE for development (not needed if real RDMA hardware is present)
 sudo apt install linux-modules-extra-$(uname -r)
 sudo modprobe rdma_rxe
 sudo rdma link add rxe0 type rxe netdev eth0
@@ -255,7 +174,7 @@ cmake -B build && cmake --build build -j
 
 ## Running Benchmarks
 
-All benchmarks are server/client pairs — start the server on one machine, run the client on another. For single-machine testing, use the RDMA-bound NIC's actual IP, **not `127.0.0.1`** (rxe/eRDMA is bound to a physical netdev like `eth0`; `127.0.0.1` routes through `lo` where no RDMA device is present, and the connection fails with `RDMA_CM_EVENT_CONNECT_ERROR`). Default port is 12345 unless noted.
+All benchmarks are server/client pairs. On the netns-isolated home lab setup, the server runs in `ns1` and the client in `ns2`, pointed at `ns1`'s IP (`192.168.100.1`) — see [RoCEv2 Bring-Up + Network Namespace Isolation](#rocev2-bring-up--network-namespace-isolation) above. Running a benchmark outside its namespace, or pointed at `127.0.0.1`, fails with `RDMA_CM_EVENT_CONNECT_ERROR` (no RDMA device on `lo`, and the root netns has neither NIC once they're assigned to `ns1`/`ns2`). Default port is 12345 unless noted.
 
 ### Phase 1 — raw RDMA primitives
 
@@ -263,16 +182,16 @@ All benchmarks are server/client pairs — start the server on one machine, run 
 cd build/phase1_verbs
 
 # Send/recv RTT
-./lat_send_recv                           # server
-./lat_send_recv <server_ip>               # client
+sudo ip netns exec ns1 ./lat_send_recv                           # server
+sudo ip netns exec ns2 ./lat_send_recv 192.168.100.1              # client
 
 # RDMA write latency (one-sided)
-./lat_rdma_write
-./lat_rdma_write <server_ip>
+sudo ip netns exec ns1 ./lat_rdma_write
+sudo ip netns exec ns2 ./lat_rdma_write 192.168.100.1
 
 # RDMA write throughput (server and client must use the same --size)
-./bw_rdma_write --size 65536
-./bw_rdma_write <server_ip> --size 65536 --iters 1000 --depth 16
+sudo ip netns exec ns1 ./bw_rdma_write --size 65536
+sudo ip netns exec ns2 ./bw_rdma_write 192.168.100.1 --size 65536 --iters 1000 --depth 16
 ```
 
 ### Phase 2 — Transport abstraction (RDMA vs TCP)
@@ -280,11 +199,11 @@ cd build/phase1_verbs
 ```bash
 cd build/phase2_transport
 
-./backend_compare rdma                    # server
-./backend_compare rdma <server_ip>        # client (TCP: replace `rdma` with `tcp`)
+sudo ip netns exec ns1 ./backend_compare rdma                    # server
+sudo ip netns exec ns2 ./backend_compare rdma 192.168.100.1       # client (TCP: replace `rdma` with `tcp`)
 
 # Use --port / --iters / --size for non-defaults; port is *not* positional.
-./backend_compare rdma --port 23456
+sudo ip netns exec ns1 ./backend_compare rdma --port 23456
 ```
 
 ### Phase 3 — ring all-reduce (multi-process collective)
@@ -295,11 +214,11 @@ cd build/phase3_collective
 # Both ranks need to start within ~60s of each other (connect retries every 100ms for 60s).
 # Args: <rank> <world_size> <base_port> <host_0> <host_1> [...] [--rdma] [--count N] [--iters N]
 
-# rank 0:
-./allreduce_bench 0 2 12345 <host_0_ip> <host_1_ip> --rdma
+# rank 0 (in ns1):
+sudo ip netns exec ns1 ./allreduce_bench 0 2 12345 192.168.100.1 192.168.100.2 --rdma
 
-# rank 1 (on the other machine):
-./allreduce_bench 1 2 12345 <host_0_ip> <host_1_ip> --rdma
+# rank 1 (in ns2):
+sudo ip netns exec ns2 ./allreduce_bench 1 2 12345 192.168.100.1 192.168.100.2 --rdma
 ```
 
 ### Phase 4 — Remote KV cache
@@ -307,16 +226,18 @@ cd build/phase3_collective
 ```bash
 cd build/phase4_kv_cache
 
-# Server: kv_server <port> <num_slots> <slot_size>
-./kv_server 12345 16 4096
+# Server (in ns1): kv_server <port> <num_slots> <slot_size>
+sudo ip netns exec ns1 ./kv_server 12345 16 4096
 
-# Client (kv_bench wires up ctrl-on-port + data-on-port+2 internally):
-./kv_bench <server_ip> 12345 [--iters <n>]
+# Client (in ns2, kv_bench wires up ctrl-on-port + data-on-port+2 internally):
+sudo ip netns exec ns2 ./kv_bench 192.168.100.1 12345 [--iters <n>]
 ```
 
-## Environment
+## Benchmark Results
+
+_Pending — numbers go here as they're collected._
+
+## Toolchain
 
 - **OS**: Ubuntu 22.04 LTS
-- **RDMA**: Alibaba Cloud ECS with eRDMA (production target); SoftRoCE (`rdma_rxe`) for local development
-- **Network**: rdma_cm-based connection setup (works across iWARP / RoCE / IB)
 - **Compiler**: GCC 7+, `-std=c11` (Phase 1), `-std=c++17` (Phase 2+)

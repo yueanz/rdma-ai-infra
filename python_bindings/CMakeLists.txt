@@ -1,8 +1,8 @@
 # pybind11 binding for the Transport layer.
 #
 # Output: a Python extension module `rai_rdma._core` (.so) that wraps
-# Phase 2's Transport interface so it can be called from Python (and
-# eventually from vLLM's KVConnectorBase_V1).
+# Phase 2's Transport interface (send/recv/read/write, torch.Tensor-aware
+# buffer registration) so it can be called from Python.
 
 # Find pybind11 from the active Python environment (venv).
 # `pybind11.get_cmake_dir()` returns the path; pass it via -Dpybind11_DIR
