@@ -54,6 +54,8 @@ int rai_cm_listen_qp(rai_qp_t *qp, int port, int *mr_listen_fd) {
     struct sockaddr_in addr  = {0};
     int ret = -1;
 
+    qp->mode = RAI_CONN_CM;
+
     ec = rdma_create_event_channel();
     if (ec == NULL) {
         LOG_ERR("rai_cm_listen_qp failed: rdma_create_event_channel failed");
@@ -141,6 +143,8 @@ int rai_cm_connect_qp(rai_qp_t *qp, const char *server_ip, int port) {
     struct rdma_cm_event *event = NULL;
     struct rdma_conn_param cp = {0};
     int ret = -1;
+
+    qp->mode = RAI_CONN_CM;
 
     ec = rdma_create_event_channel();
     if (ec == NULL) {

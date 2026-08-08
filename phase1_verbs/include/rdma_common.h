@@ -6,16 +6,29 @@ extern "C" {
 #endif
 
 /*
- * rai_conn_info_t
- *
- * MR addr+rkey pair exchanged out-of-band so each peer can target the
- * other's registered buffer with one-sided RDMA write/read. QP-level
- * setup (qpn/psn/gid) is handled by rdma_cm internally.
+ * How the connection is established. The data path (post_send/recv/write/read,
+ * poll_cq) is identical in both modes — only setup differs. CM is 0 so a
+ * zero-initialized rai_qp_t defaults to it.
+ */
+typedef enum rai_conn_mode
+{
+    RAI_CONN_CM = 0,    /* librdmacm drives the QP state machine */
+    RAI_CONN_VERBS,     /* we walk INIT → RTR → RTS by hand */
+} rai_conn_mode_t;
+
+/*
+ * Exchanged out-of-band. The OOB helpers send/recv this struct verbatim
+ * (sizeof-driven), so a field added here automatically goes on the wire.
+ * addr/rkey are used by both modes; qpn/psn/gid only by RAI_CONN_VERBS.
+ * Field order avoids padding; no endianness conversion (same-arch peers).
  */
 typedef struct rai_conn_info
 {
-    uint64_t addr;  /* Virtual address of the remote memory buffer */
-    uint32_t rkey;  /* Remote Key — authorizes RDMA access to that buffer */
+    uint64_t      addr;  /* Virtual address of the remote memory buffer */
+    union ibv_gid gid;   /* L3 address of the peer's port */
+    uint32_t      rkey;  /* Remote Key — authorizes RDMA access to that buffer */
+    uint32_t      qpn;   /* Queue Pair Number */
+    uint32_t      psn;   /* Starting Packet Sequence Number */
 } rai_conn_info_t;
 
 /*
@@ -39,16 +52,25 @@ typedef struct rai_mr
  * rai_qp_t
  *
  * One reliable connected (RC) Queue Pair = one connection to a remote peer.
- * Owns the QP, the PD/CQ created from the rdma_cm device, and the cm_id/ec
- * for connection lifetime. Single-connection-per-instance design.
+ * Single-connection-per-instance design. `mode` exists to answer one
+ * question: who owns qp/ctx, and therefore how to tear them down.
  */
 typedef struct rai_qp
 {
-    struct ibv_qp    *qp;     /* The Queue Pair handle (SQ + RQ) */
-    struct ibv_pd    *pd;     /* Protection Domain — required for ibv_reg_mr */
-    struct ibv_cq    *cq;     /* Completion Queue — polled to detect WR completion */
-    void             *cm_id;  /* struct rdma_cm_id* — rdma_cm connection handle */
-    void             *ec;     /* struct rdma_event_channel* */
+    struct ibv_context *ctx;  /* set only when we opened it ourselves (VERBS),
+                                 so non-NULL means we must ibv_close_device it */
+    struct ibv_pd      *pd;   /* Protection Domain — required for ibv_reg_mr */
+    struct ibv_cq      *cq;   /* Completion Queue — polled to detect WR completion */
+    struct ibv_qp      *qp;   /* The Queue Pair handle (SQ + RQ) */
+
+    rai_conn_mode_t     mode;
+
+    void *cm_id;              /* struct rdma_cm_id*         — CM only */
+    void *ec;                 /* struct rdma_event_channel* — CM only */
+
+    int   port_num;           /* HCA physical port          — VERBS only */
+    int   gid_index;          /* index into the GID table   — VERBS only */
+
     rai_conn_info_t  local;   /* Our own connection info */
     rai_conn_info_t  remote;  /* Peer's connection info */
 } rai_qp_t;
