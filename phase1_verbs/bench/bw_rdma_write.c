@@ -74,6 +74,7 @@ int main(int argc, char *argv[]) {
     rai_qp_t qp = {0};
     volatile uint8_t *doorbell;
     uint32_t send_flags;
+    int mr_listen_fd = -1;
 
     config_init(&cfg);
     if (config_parse(argc, argv, &cfg) != 0) {
@@ -82,13 +83,41 @@ int main(int argc, char *argv[]) {
     }
 
     if (cfg.server_ip == NULL) {
-        if (rai_cm_server(&qp, &mr, cfg.size, cfg.port) != 0) {
-            LOG_ERR("rai_cm_server failed");
+        if (rai_cm_listen_qp(&qp, cfg.port, &mr_listen_fd) != 0) {
+            LOG_ERR("rai_cm_listen_qp failed");
+            goto out;
+        }
+        if (rai_mr_reg(&qp, &mr, cfg.size) != 0) {
+            LOG_ERR("rai_mr_reg failed");
+            goto out;
+        }
+        if (rai_cm_accept_qp(&qp) != 0) {
+            LOG_ERR("rai_cm_accept_qp failed");
             goto out;
         }
     } else {
-        if (rai_cm_client(&qp, &mr, cfg.size, cfg.server_ip, cfg.port) != 0) {
-            LOG_ERR("rai_cm_client failed");
+        if (rai_cm_connect_qp(&qp, cfg.server_ip, cfg.port) != 0) {
+            LOG_ERR("rai_cm_connect_qp failed");
+            goto out;
+        }
+        if (rai_mr_reg(&qp, &mr, cfg.size) != 0) {
+            LOG_ERR("rai_mr_reg failed");
+            goto out;
+        }
+    }
+
+    /* One-sided write needs the peer's addr/rkey. Fill in our own side first —
+     * the OOB helpers send qp.local and receive into qp.remote. */
+    qp.local.addr = (uint64_t)(uintptr_t)mr.mr->addr;
+    qp.local.rkey = mr.mr->rkey;
+    if (cfg.server_ip == NULL) {
+        if (rai_oob_accept(mr_listen_fd, &qp) != 0) {
+            LOG_ERR("rai_oob_accept failed");
+            goto out;
+        }
+    } else {
+        if (rai_oob_connect(&qp, cfg.server_ip, cfg.port + 1) != 0) {
+            LOG_ERR("rai_oob_connect failed");
             goto out;
         }
     }
@@ -122,6 +151,8 @@ int main(int argc, char *argv[]) {
 
     ret = 0;
 out:
+    if (mr_listen_fd >= 0)
+        close(mr_listen_fd);
     rai_mr_dereg(&mr);    /* MR depends on PD — must dereg before qp_destroy */
     rai_qp_destroy(&qp);
     return ret;

@@ -61,13 +61,10 @@ void rai_qp_destroy(rai_qp_t *qp);
 int rai_oob_listen(int port, int *listen_fd);
 int rai_oob_accept(int listen_fd, rai_qp_t *qp);
 int rai_oob_connect(rai_qp_t *qp, const char *server_ip, int port);
-/* rdma_cm all-in-one connect: establishes connection, allocates pd/cq into qp,
-   registers MR, and exchanges addr/rkey via private_data. */
-int rai_cm_server(rai_qp_t *qp, rai_mr_t *mr, size_t mr_size, int port);
-int rai_cm_client(rai_qp_t *qp, rai_mr_t *mr, size_t mr_size,
-                  const char *server_ip, int port);
-/* Split rdma_cm flow: listen returns at CONNECT_REQUEST with PD/CQ/QP set up
-   (QP in INIT). Caller registers MR + posts recv WRs, then calls accept_qp. */
+/* rdma_cm flow: listen returns at CONNECT_REQUEST with PD/CQ/QP set up
+   (QP in INIT). Caller registers MR + posts recv WRs, then calls accept_qp.
+   mr_listen_fd receives an OOB TCP listener on port+1 for the MR addr/rkey
+   exchange; pass NULL to skip it (two-sided send/recv needs no exchange). */
 int rai_cm_listen_qp(rai_qp_t *qp, int port, int *mr_listen_fd);
 int rai_cm_accept_qp(rai_qp_t *qp);
 int rai_cm_connect_qp(rai_qp_t *qp, const char *server_ip, int port);

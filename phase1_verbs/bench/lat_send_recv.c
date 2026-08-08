@@ -79,20 +79,37 @@ int main(int argc, char *argv[]) {
     }
 
     if (cfg.server_ip == NULL) {
-        if (rai_cm_server(&qp, &mr, cfg.size, cfg.port) != 0) {
-            LOG_ERR("rai_cm_server failed");
+        if (rai_cm_listen_qp(&qp, cfg.port, NULL) != 0) {
+            LOG_ERR("rai_cm_listen_qp failed");
+            goto out;
+        }
+        if (rai_mr_reg(&qp, &mr, cfg.size) != 0) {
+            LOG_ERR("rai_mr_reg failed");
+            goto out;
+        }
+        /* Pre-post before accept: the client can send the instant the QP
+         * reaches RTS. The first loop iteration consumes this WR. */
+        if (rai_post_recv(&qp, &mr, cfg.size, 1, 0) != 0) {
+            LOG_ERR("rai_post_recv (pre-post) failed");
+            goto out;
+        }
+        if (rai_cm_accept_qp(&qp) != 0) {
+            LOG_ERR("rai_cm_accept_qp failed");
             goto out;
         }
     } else {
-        if (rai_cm_client(&qp, &mr, cfg.size, cfg.server_ip, cfg.port) != 0) {
-            LOG_ERR("rai_cm_client failed");
+        if (rai_cm_connect_qp(&qp, cfg.server_ip, cfg.port) != 0) {
+            LOG_ERR("rai_cm_connect_qp failed");
+            goto out;
+        }
+        if (rai_mr_reg(&qp, &mr, cfg.size) != 0) {
+            LOG_ERR("rai_mr_reg failed");
             goto out;
         }
     }
 
     int total_iters = kWarmup + cfg.iters;
     if (cfg.server_ip == NULL) {
-        // rai_cm_server pre-posted one recv WR; loop starts directly with poll
         for (i = 0; i < total_iters; i++) {
             if (rai_poll_cq(&qp, NULL) != 0) {
                 LOG_ERR("rdma poll completion queue failed");
