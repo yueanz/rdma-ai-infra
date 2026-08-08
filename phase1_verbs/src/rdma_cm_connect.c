@@ -72,12 +72,12 @@ int rai_cm_listen_qp(rai_qp_t *qp, int port, int *mr_listen_fd) {
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = INADDR_ANY;
     if (rdma_bind_addr(listen_id, (struct sockaddr *)&addr) != 0) {
-        LOG_ERR("rdma_cm_listen_qp failed: rdma_bind_addr failed");
+        LOG_ERR("rai_cm_listen_qp failed: rdma_bind_addr failed");
         goto out;
     }
 
     if (rdma_listen(listen_id, 1) != 0) {
-        LOG_ERR("rdma_cm_listen_qp failed: rdma_listen failed");
+        LOG_ERR("rai_cm_listen_qp failed: rdma_listen failed");
         goto out;
     }
     LOG_INFO("waiting for rdma_cm connection on port %d", port);

@@ -83,7 +83,8 @@ int  rai_mr_reg(rai_qp_t *qp, rai_mr_t *mr, size_t size);
 int  rai_mr_reg_external(rai_qp_t *qp, rai_mr_t *mr, void *buf, size_t size);
 void rai_mr_dereg(rai_mr_t *mr);
 void rai_qp_destroy(rai_qp_t *qp);
-/* OOB TCP helpers — used by exchange_buf in Phase 2+ for MR addr/rkey exchange */
+/* OOB TCP side-channel: one rai_conn_info_t per call, sending qp->local
+   and filling qp->remote. */
 int rai_oob_listen(int port, int *listen_fd);
 int rai_oob_accept(int listen_fd, rai_qp_t *qp);
 int rai_oob_connect(rai_qp_t *qp, const char *server_ip, int port);

@@ -2,27 +2,36 @@
 #include "logging.h"
 #include "timing.h"
 
+/* Argument checks and the single-entry gather list every post shares.
+ * `op` names the caller so the error still says which one failed. */
+static int prepare_sge(const char *op, rai_qp_t *qp, rai_mr_t *mr,
+                       uint32_t size, size_t offset, struct ibv_sge *sge) {
+    if (qp == NULL || qp->qp == NULL) {
+        LOG_ERR("%s failed: qp or qp->qp is null", op);
+        return -1;
+    }
+    if (mr == NULL || mr->mr == NULL) {
+        LOG_ERR("%s failed: mr or mr->mr is null", op);
+        return -1;
+    }
+    if (size == 0 || (size_t)size + offset > mr->size) {
+        LOG_ERR("%s failed: size=%u offset=%zu exceeds mr_size=%zu",
+                op, size, offset, mr->size);
+        return -1;
+    }
+    sge->addr   = (uintptr_t)((char *)mr->buf + offset);
+    sge->length = size;
+    sge->lkey   = mr->mr->lkey;
+    return 0;
+}
+
 int rai_post_send(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint64_t id, size_t offset) {
     struct ibv_sge sge = {0};
     struct ibv_send_wr wr = {0};
     struct ibv_send_wr *bad_wr = NULL;
 
-    if (qp == NULL || qp->qp == NULL) {
-        LOG_ERR("rai_post_send failed: qp or qp->qp is null");
+    if (prepare_sge("rai_post_send", qp, mr, size, offset, &sge) != 0)
         return -1;
-    }
-    if (mr == NULL || mr->mr == NULL) {
-        LOG_ERR("rai_post_send failed: mr or mr->mr is null");
-        return -1;
-    }
-    if (size == 0 || (size_t)size + offset > mr->size) {
-        LOG_ERR("post size invalid: size=%u offset=%zu mr_size=%zu", size, offset, mr->size);
-        return -1;
-    }
-
-    sge.addr = (uintptr_t)(mr->buf + offset);
-    sge.length = size;
-    sge.lkey = mr->mr->lkey;
 
     wr.wr_id = id;
     wr.sg_list = &sge;
@@ -31,7 +40,7 @@ int rai_post_send(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint64_t id, size_t
     wr.send_flags = IBV_SEND_SIGNALED;
 
     if (ibv_post_send(qp->qp, &wr, &bad_wr) != 0) {
-        LOG_ERR("failed to post send");
+        LOG_ERR("rai_post_send failed: ibv_post_send failed");
         return -1;
     }
     return 0;
@@ -42,32 +51,17 @@ int rai_post_recv(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint64_t id, size_t
     struct ibv_recv_wr wr = {0};
     struct ibv_recv_wr *bad_wr = NULL;
 
-    if (qp == NULL || qp->qp == NULL) {
-        LOG_ERR("rai_post_recv failed: qp or qp->qp is null");
+    if (prepare_sge("rai_post_recv", qp, mr, size, offset, &sge) != 0)
         return -1;
-    }
-    if (mr == NULL || mr->mr == NULL) {
-        LOG_ERR("rai_post_recv failed: mr or mr->mr is null");
-        return -1;
-    }
-    if (size == 0 || (size_t)size + offset > mr->size) {
-        LOG_ERR("recv size invalid: size=%u offset=%zu mr_size=%zu", size, offset, mr->size);
-        return -1;
-    }
-
-    sge.addr = (uintptr_t)(mr->buf + offset);
-    sge.length = size;
-    sge.lkey = mr->mr->lkey;
 
     wr.wr_id = id;
     wr.sg_list = &sge;
     wr.num_sge = 1;
 
     if (ibv_post_recv(qp->qp, &wr, &bad_wr) != 0) {
-        LOG_ERR("ibv post recv failed");
+        LOG_ERR("rai_post_recv failed: ibv_post_recv failed");
         return -1;
     }
-
     return 0;
 }
 
@@ -77,22 +71,8 @@ int rai_post_write(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint32_t send_flag
     struct ibv_send_wr wr = {0};
     struct ibv_send_wr *bad_wr = NULL;
 
-    if (qp == NULL || qp->qp == NULL) {
-        LOG_ERR("rai_post_write failed: qp or qp->qp is null");
+    if (prepare_sge("rai_post_write", qp, mr, size, offset, &sge) != 0)
         return -1;
-    }
-    if (mr == NULL || mr->mr == NULL) {
-        LOG_ERR("rai_post_write failed: mr or mr->mr is null");
-        return -1;
-    }
-    if (size == 0 || (size_t)size + offset > mr->size) {
-        LOG_ERR("write size invalid: size=%u offset=%zu mr_size=%zu", size, offset, mr->size);
-        return -1;
-    }
-
-    sge.addr = (uintptr_t)(mr->buf + offset);
-    sge.length = size;
-    sge.lkey = mr->mr->lkey;
 
     wr.wr_id = id;
     wr.sg_list = &sge;
@@ -105,8 +85,7 @@ int rai_post_write(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint32_t send_flag
     if (ibv_post_send(qp->qp, &wr, &bad_wr) != 0) {
         LOG_ERR("rai_post_write failed: ibv_post_send failed");
         return -1;
-    } 
-
+    }
     return 0;
 }
 
@@ -116,22 +95,8 @@ int rai_post_read(rai_qp_t *qp, rai_mr_t *mr, uint32_t size,
     struct ibv_send_wr wr = {0};
     struct ibv_send_wr *bad_wr = NULL;
 
-    if (qp == NULL || qp->qp == NULL) {
-        LOG_ERR("rai_post_read failed: qp or qp->qp is null");
+    if (prepare_sge("rai_post_read", qp, mr, size, offset, &sge) != 0)
         return -1;
-    }
-    if (mr == NULL || mr->mr == NULL) {
-        LOG_ERR("rai_post_read failed: mr or mr->mr is null");
-        return -1;
-    }
-    if (size == 0 || (size_t)size + offset > mr->size) {
-        LOG_ERR("read size invalid: size=%u offset=%zu mr_size=%zu", size, offset, mr->size);
-        return -1;
-    }
-
-    sge.addr = (uintptr_t)(mr->buf + offset);
-    sge.length = size;
-    sge.lkey = mr->mr->lkey;
 
     wr.wr_id = id;
     wr.sg_list = &sge;
@@ -144,8 +109,7 @@ int rai_post_read(rai_qp_t *qp, rai_mr_t *mr, uint32_t size,
     if (ibv_post_send(qp->qp, &wr, &bad_wr) != 0) {
         LOG_ERR("rai_post_read failed: ibv_post_send failed");
         return -1;
-    } 
-
+    }
     return 0;
 }
 
@@ -160,12 +124,12 @@ int rai_poll_cq(rai_qp_t *qp, uint64_t *wr_id) {
     while (1) {
         n = ibv_poll_cq(qp->cq, 1, &wc);
         if (n < 0) {
-            LOG_ERR("ibv poll completion queue failed");
+            LOG_ERR("rai_poll_cq failed: ibv_poll_cq failed");
             return -1;
         }
         if (n > 0) {
             if (wc.status != IBV_WC_SUCCESS) {
-                LOG_ERR("work completion error: %s", ibv_wc_status_str(wc.status));
+                LOG_ERR("rai_poll_cq failed: %s", ibv_wc_status_str(wc.status));
                 return -1;
             }
             if (wr_id != NULL) {
@@ -175,5 +139,4 @@ int rai_poll_cq(rai_qp_t *qp, uint64_t *wr_id) {
         }
         CPU_RELAX();
     }
-    return 0;
 }
