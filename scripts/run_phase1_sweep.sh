@@ -6,6 +6,9 @@
 #
 # Assumes setup_netns.sh has already placed the two NICs in ns1 / ns2.
 # Usage: sudo bash scripts/run_phase1_sweep.sh [output.csv]
+#   Defaults to results/phase1_sweep.csv, the dataset the figures are drawn
+#   from and the one file of this kind that is committed. Pass a name to keep
+#   a run out of the way — those stay ignored.
 #
 # Knobs (env): REPS CONN_REPS ITERS TIMEOUT SERVER_CPU CLIENT_CPU
 #   REPS=1 CONN_REPS=2 bash scripts/run_phase1_sweep.sh   # quick smoke run
@@ -15,7 +18,7 @@ NS1=ns1
 NS2=ns2
 IP1=192.168.100.1
 BIN=${BIN:-build/phase1_verbs}
-CSV=${1:-phase1_sweep.csv}
+CSV=${1:-results/phase1_sweep.csv}
 
 REPS=${REPS:-5}
 CONN_REPS=${CONN_REPS:-10}   # cm-vs-verbs is a null result; repeat it instead of sweeping it
@@ -114,6 +117,7 @@ echo "$NS1: $NS1_DEV gid=$NS1_GID    $NS2: $NS2_DEV gid=$NS2_GID"
 
 # The C side owns the column list; `rep` is the script's own, since the
 # benchmark has no idea it is being run repeatedly.
+mkdir -p "$(dirname "$CSV")"
 { "$BIN/lat_send_recv" --csv-header | tr -d '\n'; echo ",rep"; } > "$CSV"
 
 PORT=13000

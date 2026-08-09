@@ -11,5 +11,8 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
-# benchmark output
+# Sweep output. These are measurements, not build artefacts — they cannot be
+# regenerated without the two-NIC setup — so the published dataset is tracked
+# and only scratch runs are ignored.
 *.csv
+!results/*.csv
