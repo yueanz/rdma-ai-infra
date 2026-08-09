@@ -20,10 +20,9 @@ Tested on a real RDMA home lab: two ConnectX-4 NICs, RoCEv2, bare metal, connect
 
 | | |
 |---|---|
-| ![Chassis before install](pictures/01-chassis-before-install.jpg) | Chassis opened, bare motherboard — before installing RAM or NICs. |
-| ![ConnectX-4 NICs unboxed](pictures/02-connectx4-nics-unboxed.jpg) | Two Mellanox ConnectX-4 100GbE NICs, still in anti-static trays. |
-| ![ConnectX-4 installed](pictures/03-connectx4-installed.jpg) | Both cards seated in PCIe slots. |
-| ![QSFP28 DAC cable](pictures/04-qsfp-dac-cable.jpg) | QSFP28 DAC cable — connects the two ports back-to-back, no switch in the loop. |
+| ![Chassis before install](pictures/01-chassis-before-install.jpg) | Chassis opened, RAM in, PCIe slots still empty. |
+| ![ConnectX-4 NICs unboxed](pictures/02-connectx4-nics-unboxed.jpg) | Two Mellanox ConnectX-4 100GbE NICs. |
+| ![ConnectX-4 installed](pictures/03-connectx4-installed.jpg) | Both cards seated, wired to each other with a QSFP28 DAC — no switch in the loop. |
 
 ### Bring-up
 
@@ -67,54 +66,33 @@ scripts/           bring-up, benchmark sweep, plotting.
 
 ## Build
 
-**Quick start** (auto-detects hardware RDMA / falls back to SoftRoCE, installs deps, builds):
-
 ```bash
-bash scripts/setup.sh
+bash scripts/setup.sh                      # dependencies, then build
+cmake -B build && cmake --build build -j   # just the build, deps already in place
 ```
 
-**Manual** (Ubuntu 22.04):
-
-```bash
-sudo apt install build-essential cmake libibverbs-dev librdmacm-dev ibverbs-utils rdma-core
-
-# Optional: SoftRoCE for development (not needed if real RDMA hardware is present)
-sudo apt install linux-modules-extra-$(uname -r)
-sudo modprobe rdma_rxe
-sudo rdma link add rxe0 type rxe netdev eth0
-
-# Build (defaults to RelWithDebInfo; pass -DCMAKE_BUILD_TYPE=Debug for gdb work)
-cmake -B build && cmake --build build -j
-```
+Defaults to `RelWithDebInfo`; pass `-DCMAKE_BUILD_TYPE=Debug` for gdb work.
 
 ## Running Benchmarks
 
-Each benchmark is a server/client pair: server in `ns1`, client in `ns2` aimed
-at `192.168.100.1`. Run one outside its namespace, or against `127.0.0.1`, and
-it fails with `RDMA_CM_EVENT_CONNECT_ERROR` — there is no RDMA device on `lo`,
-and the root namespace has neither NIC once the two are handed out.
+The whole sweep, against perftest at the same points, plus the figures:
 
 ```bash
-# terminal 1                                    # terminal 2
-sudo ip netns exec ns1 \                        sudo ip netns exec ns2 \
-  ./build/phase1_verbs/lat_send_recv              ./build/phase1_verbs/lat_send_recv 192.168.100.1
+sudo bash scripts/run_phase1_sweep.sh   # ~10 min -> results/phase1_sweep.csv
+python3 scripts/plot_phase1.py          # -> results/*.png
 ```
 
-Same shape for `lat_rdma_write` and `bw_rdma_write`, and for phases 2-4 (see
-`--help`). Both sides must agree on `--size`, `--depth` and `--conn`.
-
-`--conn cm|verbs` picks how the queue pair is brought up: librdmacm, or the
-state machine walked by hand. The data path is the same code either way, so a
-matched pair of runs isolates connection setup and nothing else.
-
-The full sweep — every size and queue depth, against perftest at the same
-points, five runs each — is one command, and the figures below come straight
-out of its CSV:
+One benchmark on its own — server in `ns1`, client in `ns2`:
 
 ```bash
-sudo bash scripts/run_phase1_sweep.sh      # ~10 min -> results/phase1_sweep.csv
-python3 scripts/plot_phase1.py             # -> results/*.png
+sudo ip netns exec ns1 ./build/phase1_verbs/lat_send_recv
+sudo ip netns exec ns2 ./build/phase1_verbs/lat_send_recv 192.168.100.1
 ```
+
+Same shape for the others; `--help` lists the options. Both sides must agree on
+`--size`, `--depth` and `--conn`. `--conn cm|verbs` selects how the queue pair
+is brought up — librdmacm, or the state machine by hand — over an identical
+data path, so a matched pair of runs isolates connection setup and nothing else.
 
 ## Benchmark Results
 
