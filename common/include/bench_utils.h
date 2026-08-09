@@ -12,26 +12,44 @@ static inline int cmp_u64(const void *a, const void *b) {
     return (x > y) - (x < y);
 }
 
-/* Print latency results. samples must be sorted ascending.
+typedef struct lat_stats {
+    double min_us, median_us, p99_us, max_us;
+} lat_stats_t;
+
+/* samples must be sorted ascending.
  *
  * Percentile indexing: for percentile p of n samples, the 0-indexed
  * position is (int)((n - 1) * p/100). This puts p99 at samples[98]
  * for n=100 (the 99th value out of 100), not samples[99] (which would
  * always equal max). */
+static inline lat_stats_t latency_stats(uint64_t *samples, int n) {
+    lat_stats_t s = {0, 0, 0, 0};
+    if (n <= 0)
+        return s;
+    s.min_us    = ns_to_us(samples[0]);
+    s.median_us = ns_to_us(samples[(n - 1) / 2]);
+    s.p99_us    = ns_to_us(samples[(int)((n - 1) * 0.99)]);
+    s.max_us    = ns_to_us(samples[n - 1]);
+    return s;
+}
+
+static inline double bandwidth_gbps(uint64_t total_bytes, uint64_t elapsed_ns) {
+    if (elapsed_ns == 0)
+        return 0;
+    return (double)total_bytes * 8 / (elapsed_ns / 1e9) / 1e9;
+}
+
+/* Print latency results. samples must be sorted ascending. */
 static inline void print_latency(const char *label, uint64_t *samples, int n) {
     if (n <= 0) {
         printf("\n--- %s --- (no samples)\n", label);
         return;
     }
-    int idx_median = (n - 1) / 2;
-    int idx_p99    = (int)((n - 1) * 0.99);
+    lat_stats_t s = latency_stats(samples, n);
     printf("\n--- %s ---\n", label);
     printf("  %-10s %-10s %-10s %-10s\n", "min(us)", "median(us)", "p99(us)", "max(us)");
     printf("  %-10.2f %-10.2f %-10.2f %-10.2f\n",
-        ns_to_us(samples[0]),
-        ns_to_us(samples[idx_median]),
-        ns_to_us(samples[idx_p99]),
-        ns_to_us(samples[n - 1]));
+           s.min_us, s.median_us, s.p99_us, s.max_us);
     printf("---------------------------\n");
 }
 
@@ -43,7 +61,7 @@ static inline void print_bandwidth(const char *label,
         return;
     }
     double elapsed_ms = elapsed_ns / 1e6;
-    double gbps       = (double)total_bytes * 8 / (elapsed_ns / 1e9) / 1e9;
+    double gbps       = bandwidth_gbps(total_bytes, elapsed_ns);
     double GiBps      = (double)total_bytes / (elapsed_ns / 1e9) / (1024.0 * 1024 * 1024);
     printf("\n--- %s ---\n", label);
     printf("  transferred : %lu bytes (%.2f MiB)\n",

@@ -22,6 +22,10 @@ int main(int argc, char *argv[]) {
         bench_config_usage(argv[0]);
         goto out;
     }
+    if (cfg.csv_header) {
+        printf("%s\n", BENCH_CSV_HEADER);
+        return 0;
+    }
 
     if (cfg.server_ip == NULL) {
         if (bench_listen(&qp, &cfg, &mr_listen_fd) != 0) {
@@ -91,7 +95,8 @@ int main(int argc, char *argv[]) {
             }
         }
         total_time = time_elapsed_ns(bw_start, time_now_ns());
-        print_bandwidth("rdma write throughput", (uint64_t)cfg.size*cfg.iters, total_time);
+        bench_report_bandwidth("bw_rdma_write", "rdma write throughput",
+                               &cfg, (uint64_t)cfg.size*cfg.iters, total_time);
     }
 
     /* The doorbell only tells the server that the last write's *data* landed.

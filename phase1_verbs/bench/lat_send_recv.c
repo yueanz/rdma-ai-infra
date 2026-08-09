@@ -21,6 +21,10 @@ int main(int argc, char *argv[]) {
         bench_config_usage(argv[0]);
         goto out;
     }
+    if (cfg.csv_header) {
+        printf("%s\n", BENCH_CSV_HEADER);
+        return 0;
+    }
 
     if (cfg.server_ip == NULL) {
         if (bench_listen(&qp, &cfg, NULL) != 0) {
@@ -107,7 +111,8 @@ int main(int argc, char *argv[]) {
         }
 
         qsort(latencies, cfg.iters, sizeof(uint64_t), cmp_u64);
-        print_latency("send/recv latency (RTT)", latencies, cfg.iters);
+        bench_report_latency("lat_send_recv", "send/recv latency (RTT)",
+                             &cfg, latencies, cfg.iters);
     }
 
     ret = 0;

@@ -3,6 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include "rdma_common.h"
+#include "bench_utils.h"
+
+/* Column order for --csv. Kept next to the emitters so a new column cannot be
+ * added to one without the other. */
+#define BENCH_CSV_HEADER \
+    "bench,conn,size,depth,iters,min_us,median_us,p99_us,max_us,gbps"
 
 /* Shared command-line handling for the phase1 benchmarks. One struct carries
  * every option; a benchmark that has no use for a field just ignores it. */
@@ -13,15 +19,19 @@ typedef struct bench_config {
     int             size;
     int             depth;      /* in-flight WRs; bandwidth benchmarks only */
     rai_conn_mode_t conn;
+    int             csv;        /* emit one machine-readable row instead */
+    int             csv_header; /* print the header and exit */
 } bench_config_t;
 
 static inline void bench_config_init(bench_config_t *cfg) {
-    cfg->server_ip = NULL;
-    cfg->port      = 12345;
-    cfg->iters     = 1000;
-    cfg->size      = 4096;
-    cfg->depth     = 16;
-    cfg->conn      = RAI_CONN_CM;
+    cfg->server_ip  = NULL;
+    cfg->port       = 12345;
+    cfg->iters      = 1000;
+    cfg->size       = 4096;
+    cfg->depth      = 16;
+    cfg->conn       = RAI_CONN_CM;
+    cfg->csv        = 0;
+    cfg->csv_header = 0;
 }
 
 static inline void bench_config_usage(const char *prog) {
@@ -35,6 +45,8 @@ static inline void bench_config_usage(const char *prog) {
     printf("  --depth <n>       default 16, max %d (bandwidth benchmarks only)\n",
            RAI_QP_MAX_WR);
     printf("  --conn cm|verbs   default cm\n");
+    printf("  --csv             emit one CSV row instead of a table\n");
+    printf("  --csv-header      print the CSV header and exit\n");
 }
 
 static inline int bench_config_parse(int argc, char *argv[], bench_config_t *cfg) {
@@ -44,6 +56,14 @@ static inline int bench_config_parse(int argc, char *argv[], bench_config_t *cfg
 
         if (opt[0] != '-') {
             cfg->server_ip = argv[i];
+            continue;
+        }
+        if (strcmp(opt, "--csv") == 0) {
+            cfg->csv = 1;
+            continue;
+        }
+        if (strcmp(opt, "--csv-header") == 0) {
+            cfg->csv_header = 1;
             continue;
         }
         /* Every option below takes exactly one value, so consume it up front
@@ -96,6 +116,38 @@ static inline int bench_config_parse(int argc, char *argv[], bench_config_t *cfg
         return -1;
     }
     return 0;
+}
+
+static inline const char *bench_conn_name(const bench_config_t *cfg) {
+    return cfg->conn == RAI_CONN_VERBS ? "verbs" : "cm";
+}
+
+/* Latency and bandwidth benchmarks share the CSV schema, so each fills only
+ * its own columns and leaves the other's empty. `name` identifies the run in
+ * CSV; `label` is the human-readable title. */
+static inline void bench_report_latency(const char *name, const char *label,
+                                        const bench_config_t *cfg,
+                                        uint64_t *sorted, int n) {
+    if (!cfg->csv) {
+        print_latency(label, sorted, n);
+        return;
+    }
+    lat_stats_t s = latency_stats(sorted, n);
+    printf("%s,%s,%d,,%d,%.3f,%.3f,%.3f,%.3f,\n",
+           name, bench_conn_name(cfg), cfg->size, cfg->iters,
+           s.min_us, s.median_us, s.p99_us, s.max_us);
+}
+
+static inline void bench_report_bandwidth(const char *name, const char *label,
+                                          const bench_config_t *cfg,
+                                          uint64_t total_bytes, uint64_t elapsed_ns) {
+    if (!cfg->csv) {
+        print_bandwidth(label, total_bytes, elapsed_ns);
+        return;
+    }
+    printf("%s,%s,%d,%d,%d,,,,,%.3f\n",
+           name, bench_conn_name(cfg), cfg->size, cfg->depth, cfg->iters,
+           bandwidth_gbps(total_bytes, elapsed_ns));
 }
 
 /* Connection setup, dispatched on cfg->conn. The two modes have identical

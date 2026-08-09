@@ -32,6 +32,10 @@ int main(int argc, char *argv[]) {
         bench_config_usage(argv[0]);
         goto out;
     }
+    if (cfg.csv_header) {
+        printf("%s\n", BENCH_CSV_HEADER);
+        return 0;
+    }
     reply_off = (size_t)cfg.size;
 
     if (cfg.server_ip == NULL) {
@@ -141,7 +145,8 @@ int main(int argc, char *argv[]) {
                 latencies[i - kWarmup] = time_elapsed_ns(iter_start, time_now_ns());
         }
         qsort(latencies, cfg.iters, sizeof(uint64_t), cmp_u64);
-        print_latency("rdma write RTT (one-sided ping-pong)", latencies, cfg.iters);
+        bench_report_latency("lat_rdma_write", "rdma write RTT (one-sided ping-pong)",
+                             &cfg, latencies, cfg.iters);
     }
 
     /* The client leaves as soon as it sees the reply's doorbell, but that only
