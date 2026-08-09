@@ -32,6 +32,10 @@ int main(int argc, char *argv[]) {
             LOG_ERR("rai_mr_reg failed");
             goto out;
         }
+        /* Clear the doorbell while the QP is still in INIT. Clearing it after
+         * the QP goes live risks wiping the last write's flag and spinning
+         * forever, and the buffer starts out as uninitialized heap anyway. */
+        ((uint8_t *)mr.buf)[cfg.size - 1] = 0;
         if (bench_accept(&qp, &cfg) != 0) {
             LOG_ERR("accept failed");
             goto out;
@@ -65,13 +69,13 @@ int main(int argc, char *argv[]) {
 
     int total_iters = kWarmup + cfg.iters;
     doorbell = (uint8_t *)mr.buf + cfg.size - 1;
-    *doorbell = 0;
     if (cfg.server_ip == NULL) {
         // server side: only wait for the last write's doorbell
         while (*doorbell == 0)
             CPU_RELAX();
     } else {
         // client side: only set doorbell on the last iteration
+        *doorbell = 0;
         for (i = 0; i < total_iters; i++) {
             if (i == total_iters - 1) *doorbell = 1;
             if (i == kWarmup) bw_start = time_now_ns();  // start bandwidth timer after warmup
@@ -88,6 +92,23 @@ int main(int argc, char *argv[]) {
         }
         total_time = time_elapsed_ns(bw_start, time_now_ns());
         print_bandwidth("rdma write throughput", (uint64_t)cfg.size*cfg.iters, total_time);
+    }
+
+    /* The doorbell only tells the server that the last write's *data* landed.
+     * RC may still owe ACKs for the unsignaled writes behind it, so a server
+     * that tears down here leaves the client retrying into a dead QP until
+     * IBV_WC_RETRY_EXC_ERR. Hold both sides until the client has reaped every
+     * completion. */
+    if (cfg.server_ip == NULL) {
+        if (rai_oob_accept(mr_listen_fd, &qp) != 0) {
+            LOG_ERR("teardown sync failed");
+            goto out;
+        }
+    } else {
+        if (rai_oob_connect(&qp, cfg.server_ip, cfg.port + 1) != 0) {
+            LOG_ERR("teardown sync failed");
+            goto out;
+        }
     }
 
     ret = 0;

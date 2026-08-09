@@ -115,6 +115,22 @@ int main(int argc, char *argv[]) {
         print_latency("rdma write latency (one-sided)", latencies, cfg.iters);
     }
 
+    /* Seeing the last doorbell only means the data landed; the ACK may still
+     * be on its way back. Hold the server until the client has reaped it, the
+     * same way bw_rdma_write does — only one write is ever outstanding here,
+     * so the margin is wide, but the race is the same shape. */
+    if (cfg.server_ip == NULL) {
+        if (rai_oob_accept(mr_listen_fd, &qp) != 0) {
+            LOG_ERR("teardown sync failed");
+            goto out;
+        }
+    } else {
+        if (rai_oob_connect(&qp, cfg.server_ip, cfg.port + 1) != 0) {
+            LOG_ERR("teardown sync failed");
+            goto out;
+        }
+    }
+
     ret = 0;
 out:
     if (mr_listen_fd >= 0)

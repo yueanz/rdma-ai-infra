@@ -8,9 +8,27 @@
 
 #define CQ_DEPTH 128
 
-/* This path is RoCE-only: the RTR transition below always routes via GRH. */
+/* ::ffff:a.b.c.d — the GID a RoCE port gets for an IPv4 address on its netdev */
+static int gid_is_ipv4_mapped(const union ibv_gid *gid) {
+    static const uint8_t v4_prefix[12] = { 0,0,0,0, 0,0,0,0, 0,0,0xff,0xff };
+    return memcmp(gid->raw, v4_prefix, sizeof(v4_prefix)) == 0;
+}
+
+static int gid_is_link_local(const union ibv_gid *gid) {
+    return gid->raw[0] == 0xfe && (gid->raw[1] & 0xc0) == 0x80;
+}
+
+/* This path is RoCE-only: the RTR transition below always routes via GRH.
+ *
+ * A port typically carries several RoCE v2 GIDs — one per address on its
+ * netdev, including the auto-generated IPv6 link-local one. Taking the first
+ * would pick that link-local entry, while rdma_cm resolves an IPv4 peer to the
+ * IPv4-mapped GID, so the two connection modes would not even use the same IP
+ * version. Prefer IPv4-mapped, then any routable GID, and only fall back to
+ * link-local if the port has nothing else. */
 static int find_roce_v2_gid(struct ibv_context *ctx, int port) {
     struct ibv_port_attr port_attr;
+    int routable = -1, link_local = -1;
 
     if (ibv_query_port(ctx, port, &port_attr) != 0) {
         LOG_ERR("ibv_query_port failed");
@@ -20,10 +38,23 @@ static int find_roce_v2_gid(struct ibv_context *ctx, int port) {
         struct ibv_gid_entry entry;
         if (ibv_query_gid_ex(ctx, port, i, &entry, 0) != 0)
             continue;   /* empty table slot */
-        if (entry.gid_type == IBV_GID_TYPE_ROCE_V2)
+        if (entry.gid_type != IBV_GID_TYPE_ROCE_V2)
+            continue;
+        if (gid_is_ipv4_mapped(&entry.gid))
             return i;
+        if (gid_is_link_local(&entry.gid)) {
+            if (link_local < 0)
+                link_local = i;
+        } else if (routable < 0) {
+            routable = i;
+        }
     }
-    return -1;
+    if (routable >= 0)
+        return routable;
+    if (link_local >= 0)
+        LOG_INFO("no IPv4 RoCE v2 GID on port %d, falling back to link-local index %d",
+                 port, link_local);
+    return link_local;
 }
 
 static struct ibv_context *open_device(void) {

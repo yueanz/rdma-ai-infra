@@ -39,12 +39,29 @@ Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), implementing
 | 4 | 4.71 GiB/s / 40.44 Gbps | 1.65 GiB/s / 14.17 Gbps |
 | 8 | 5.74 GiB/s / 49.33 Gbps | — (UDP buffer overflow) |
 | 16 | 6.72 GiB/s / 57.76 Gbps | — |
-| 32 | WR_FLUSH_ERR | — |
+| 32 | WR_FLUSH_ERR † | — |
+
+† **Retracted attribution.** This row was originally read as a fabric limit. It
+was a bug in `bw_rdma_write`: the server treated the arrival of the last write's
+doorbell as "test over" and tore the QP down, while RC still owed ACKs for the
+unsignaled writes queued behind it. The client retried into a dead QP
+(`IBV_WC_RETRY_EXC_ERR`), the QP went to error, and everything still queued
+surfaced as `WR_FLUSH_ERR`. The failure gets likelier as depth grows, because
+depth *is* the number of writes that can be unacknowledged at exit — which is
+exactly the pattern this row shows.
+
+Reproduced and fixed later on bare-metal ConnectX-4 (perftest has the same
+teardown handshake, commented "server just waits for client to exit"). With the
+fix the depth sweep no longer has a cliff at all — 64 KB writes run 88.42 /
+88.57 / 89.68 Gbps at depth 16 / 32 / 64, i.e. flat once the link is saturated.
+Whether eRDMA additionally had a ceiling here was never established — the
+benchmark could not have told the difference, so the original claim is
+withdrawn rather than replaced.
 
 **Key insights:**
 - RDMA write is ~21% lower latency than send/recv (median: 31 vs 40 μs) — one-sided ops bypass server-side CPU entirely
 - Burst vs sustained throughput gap (78 → 28 Gbps) reflects Alibaba Cloud eRDMA fabric QoS: short transfers run at line rate, sustained transfers are throttled to a committed rate
-- eRDMA throughput scales near-linearly to depth=8, then diminishing returns as depth=16 saturates the NIC (~58 Gbps); depth=32 errors out with `WR_FLUSH_ERR` — a fabric-level ceiling, not the QP's `max_send_wr` (set to 128 in `rdma_cm_connect.c`).
+- eRDMA throughput scales near-linearly to depth=8, then diminishing returns as depth=16 saturates the NIC (~58 Gbps). The depth=32 row is a benchmark bug, not a fabric ceiling — see the note above the insights.
 - SoftRoCE caps out at depth=4 (14 Gbps); depth≥8 triggers UDP buffer overflow — 65 KB × 8 in-flight = 128 concurrent UDP packets exceeds the kernel receive buffer; eRDMA at depth=4 (40 Gbps) already outperforms SoftRoCE's ceiling
 
 ### Phase 1 — SoftRoCE (Alibaba Cloud ECS, two machines)
