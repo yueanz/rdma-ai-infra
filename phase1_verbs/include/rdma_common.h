@@ -9,6 +9,12 @@ extern "C" {
  * can keep in flight before it must reap completions. */
 #define RAI_QP_MAX_WR 128
 
+/* Inline capacity requested at QP creation (perftest's latency-test default).
+ * A payload this small is copied into the work request itself, sparing the
+ * NIC a DMA fetch of the buffer. The driver reports back what it actually
+ * granted; posts compare against that, not against this request. */
+#define RAI_MAX_INLINE 220
+
 /*
  * How the connection is established. The data path (post_send/recv/write/read,
  * poll_cq) is identical in both modes — only setup differs. CM is 0 so a
@@ -74,6 +80,9 @@ typedef struct rai_qp
 
     int   port_num;           /* HCA physical port          — VERBS only */
     int   gid_index;          /* index into the GID table   — VERBS only */
+
+    uint32_t max_inline;      /* inline bytes the driver granted; sends and
+                                 writes at or under this go IBV_SEND_INLINE */
 
     rai_conn_info_t  local;   /* Our own connection info */
     rai_conn_info_t  remote;  /* Peer's connection info */

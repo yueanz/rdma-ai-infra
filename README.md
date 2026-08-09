@@ -108,12 +108,12 @@ Median of at least five runs per point, with the equivalent perftest tool run
 at the same points on the same link. Latency is one-way throughout: these
 benchmarks time a round trip, perftest halves it before printing.
 
-- **Latency within 4% of perftest from 256 B up**, bandwidth within 2%
+- **Latency within 4% of perftest at every size**, bandwidth within 2%
   wherever the link is the bottleneck.
 - **Receive queue depth decides how often a slow path gets hit** — one work
   request posted instead of eight costs 1.78 → 3.56 µs one-way. perftest moves
-  the same way, 1.83 → 3.69: this is the hardware, not the implementation.
-- **One-sided is not the faster one** — 3% at 64 B here, 9% for perftest, and
+  the same way, 1.83 → 3.66: this is the hardware, not the implementation.
+- **One-sided is not the faster one** — 8% at 64 B here, 9% for perftest, and
   nothing at all by 1 MB. What it buys is that the far side posts no work
   requests and reaps no completions: CPU, not µs.
 
@@ -145,14 +145,14 @@ parentheses:
 
 | | 64 B | 4 KB | 64 KB | 1 MB |
 |---|---|---|---|---|
-| send/recv | 1.14 (0.86) | 1.77 (1.80) | 8.45 (8.68) | 94.4 (94.6) |
-| write | 1.11 (0.79) | 1.76 (1.80) | 8.38 (8.56) | 94.5 (94.5) |
+| send/recv | 0.88 (0.86) | 1.77 (1.83) | 8.54 (8.70) | 94.5 (95.1) |
+| write | 0.81 (0.79) | 1.76 (1.80) | 8.39 (8.59) | 94.6 (95.0) |
 
-64 B is the one place they part: perftest sends a message that small inline,
-riding inside the work request and sparing the NIC a fetch from host memory.
-That is not implemented here and it costs 33–40%.
+Messages of 220 B or less go inline: the payload rides inside the work request
+itself, sparing the NIC a separate fetch of the buffer. Before that was added
+the 64 B row read 1.14 and 1.11 — 33–40% behind.
 
-Write bandwidth reaches 92.4 Gbps at 16 KB, 91.9 at 64 KB and 90.7 at 1 MB
+Write bandwidth reaches 92.4 Gbps at 16 KB, 92.0 at 64 KB and 90.8 at 1 MB
 (`ib_write_bw`: 92.5, 92.5, 92.6). Below 16 KB neither tool is link-bound and
 the result turns on how each one pipelines; they are not configured
 equivalently there, so that range is left out rather than claimed.
@@ -160,7 +160,7 @@ equivalently there, so that range is left out rather than claimed.
 ### Connection setup mode
 
 librdmacm and the hand-written INIT → RTR → RTS path are indistinguishable —
-1.77 vs 1.77 µs send/recv, 92.04 vs 92.03 Gbps — which is the expected answer,
+1.77 vs 1.77 µs send/recv, 92.03 vs 92.05 Gbps — which is the expected answer,
 since setup happens once, before the loop being timed. The result worth having
 is that the state machine is a drop-in for the library, not that it is quicker.
 

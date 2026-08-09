@@ -115,9 +115,6 @@ def fig_latency_vs_size(lat):
     ax.set_xlim(sizes[0] / 1.6, sizes[-1] * 1.6)
     ax.set_ylim(0.45, 160)
     dress(ax)
-    ax.text(sizes[0] / 1.4, 0.52,
-            "perftest sends messages this small inline; this implementation does not",
-            fontsize=8, color=INK_2, va="bottom", ha="left")
     legend(ax, loc="upper left")
 
     fig.tight_layout()

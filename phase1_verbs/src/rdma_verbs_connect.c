@@ -128,11 +128,13 @@ static int build_qp_verbs(rai_qp_t *qp) {
     init_attr.cap.max_recv_wr  = RAI_QP_MAX_WR;
     init_attr.cap.max_send_sge = 1;
     init_attr.cap.max_recv_sge = 1;
+    init_attr.cap.max_inline_data = RAI_MAX_INLINE;
     qp->qp = ibv_create_qp(qp->pd, &init_attr);
     if (qp->qp == NULL) {
         LOG_ERR("ibv_create_qp failed");
         return -1;
     }
+    qp->max_inline = init_attr.cap.max_inline_data;  /* updated to actual */
 
     qp->local.qpn = qp->qp->qp_num;
     qp->local.psn = 0;   /* both sides use 0, as NCCL does — nothing to sync */

@@ -38,6 +38,8 @@ int rai_post_send(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint64_t id, size_t
     wr.num_sge = 1;
     wr.opcode = IBV_WR_SEND;
     wr.send_flags = IBV_SEND_SIGNALED;
+    if (size <= qp->max_inline)
+        wr.send_flags |= IBV_SEND_INLINE;
 
     if (ibv_post_send(qp->qp, &wr, &bad_wr) != 0) {
         LOG_ERR("rai_post_send failed: ibv_post_send failed");
@@ -79,6 +81,8 @@ int rai_post_write(rai_qp_t *qp, rai_mr_t *mr, uint32_t size, uint32_t send_flag
     wr.num_sge = 1;
     wr.opcode = IBV_WR_RDMA_WRITE;
     wr.send_flags = send_flags;
+    if (size <= qp->max_inline)
+        wr.send_flags |= IBV_SEND_INLINE;
     wr.wr.rdma.remote_addr = remote_addr;
     wr.wr.rdma.rkey = rkey;
 

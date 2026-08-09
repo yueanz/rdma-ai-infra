@@ -39,7 +39,7 @@ Pre-posting a batch: **7.81 → 3.89 µs RTT**, within about 5% of perftest.
 
 The confirmation was worth more than the fix. perftest exposes the same setting
 as `-r`, so it could be swept too — and it slows down by the same amount,
-1.83 → 3.69 µs one-way at the shallow end (its `-r` rounds odd values up, so
+1.83 → 3.66 µs one-way at the shallow end (its `-r` rounds odd values up, so
 two is as low as it goes). Whatever causes this sits below both
 programs, in the driver or the card. The one-sided write benchmark, which posts
 no receive work requests at all, does not move.
@@ -88,10 +88,10 @@ that is a stall every two messages. At 64 KB:
 
 | depth | before | after | `ib_write_bw` |
 |---|---|---|---|
-| 1 | 59.22 | 59.30 | 59.53 |
-| 2 | 70.77 | **92.21** | 92.54 |
-| 4 | 80.38 | 92.30 | 92.54 |
-| 16 | 88.84 | 92.03 | 92.54 |
+| 1 | 59.22 | 59.27 | 59.47 |
+| 2 | 70.77 | **92.25** | 92.54 |
+| 4 | 80.38 | 92.32 | 92.54 |
+| 16 | 88.84 | 92.05 | 92.54 |
 
 The "after" column and the perftest column are from
 [`results/phase1_sweep.csv`](../results/phase1_sweep.csv); "before" is a run
