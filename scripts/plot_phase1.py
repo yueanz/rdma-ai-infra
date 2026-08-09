@@ -16,7 +16,6 @@ from collections import defaultdict
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter
 
 CSV = sys.argv[1] if len(sys.argv) > 1 else "results/phase1_sweep.csv"
@@ -48,7 +47,15 @@ def load():
     for r in csv.DictReader(open(CSV)):
         if r["conn"] != "verbs":
             continue
-        key = (r["bench"], int(r["size"]), int(r["depth"] or 0))
+        depth = int(r["depth"] or 0)
+        # ib_send_lat rounds an odd -r up to the next even value before it runs
+        # ("WA for a bug when rx_depth is odd in SEND", perftest_parameters.c),
+        # so plot its points at the depth it actually used, not the one asked
+        # for. Confirmed on this link: -r 1 and -r 2 measure the same, as do
+        # 3 and 4, and 5 and 6.
+        if r["bench"] == "perftest_ib_send_lat" and depth % 2 == 1:
+            depth += 1
+        key = (r["bench"], int(r["size"]), depth)
         if r["median_us"]:
             # ours is a round trip, perftest already halved its own
             half = 1 if r["bench"].startswith("perftest") else 2
@@ -58,28 +65,16 @@ def load():
     return lat, bw
 
 
-def band(ax, xs, series, color, style, label, marker="o"):
-    """Median line with a min-max whisker at every point."""
-    med = [st.median(series[x]) for x in xs]
-    lo = [min(series[x]) for x in xs]
-    hi = [max(series[x]) for x in xs]
-    ax.errorbar(xs, med, yerr=[
-        [m - l for m, l in zip(med, lo)],
-        [h - m for m, h in zip(med, hi)],
-    ], color=color, linestyle=style, linewidth=2, marker=marker,
-        markersize=5, capsize=3, elinewidth=1, label=label, zorder=3)
-    return med
+def line(ax, xs, series, color, style, label):
+    """Median across repetitions. No error bar: run-to-run spread is under 1%
+    almost everywhere, and points were not all repeated the same number of
+    times, so a min-max whisker would have shown sample size more than noise."""
+    ax.plot(xs, [st.median(series[x]) for x in xs], color=color, linestyle=style,
+            linewidth=2, marker="o", markersize=5, label=label, zorder=3)
 
 
-def legend(ax, entries, **kw):
-    """errorbar hands the legend a short handle with a marker parked in the
-    middle of it, which hides the dash pattern — and dash vs solid is the only
-    thing separating this implementation from the reference. Draw the handles
-    explicitly instead."""
-    ax.legend(
-        handles=[Line2D([], [], color=c, linestyle=st_, linewidth=2, label=l)
-                 for c, st_, l in entries],
-        frameon=False, fontsize=8, handlelength=3.2, **kw)
+def legend(ax, **kw):
+    ax.legend(frameon=False, fontsize=8, handlelength=3.2, **kw)
 
 
 def dress(ax):
@@ -106,7 +101,7 @@ def fig_latency_vs_size(lat):
     ):
         series = {s: lat[(bench, s, 64)] for s in sizes if lat.get((bench, s, 64))}
         if series:
-            band(ax, sorted(series), series, color, style, label)
+            line(ax, sorted(series), series, color, style, label)
 
     ax.set_xscale("log", base=2)
     ax.set_yscale("log")
@@ -123,10 +118,7 @@ def fig_latency_vs_size(lat):
     ax.text(sizes[0] / 1.4, 0.52,
             "perftest sends messages this small inline; this implementation does not",
             fontsize=8, color=INK_2, va="bottom", ha="left")
-    legend(ax, [(BLUE, "-", "send/recv — this implementation"),
-                (BLUE, "--", "send/recv — ib_send_lat"),
-                (ORANGE, "-", "write — this implementation"),
-                (ORANGE, "--", "write — ib_write_lat")], loc="upper left")
+    legend(ax, loc="upper left")
 
     fig.tight_layout()
     out = f"{OUTDIR}/phase1-latency-vs-size.png"
@@ -141,19 +133,22 @@ def fig_latency_vs_rqdepth(lat):
     queue — the knob does not reach it, so those seven points are the same run
     repeated. That is worth plotting anyway: had the machine drifted during the
     sweep it would have moved too, so its flatness is what makes the drop in the
-    other two a real effect rather than an artefact."""
+    other two a real effect rather than an artefact.
+
+    The perftest line starts at 2 because its -r cannot be driven below that;
+    see the rounding note in load()."""
     SIZE = 4096
     depths = sorted({k[2] for k in lat if k[0] == "lat_send_recv" and k[1] == SIZE and k[2]})
 
     fig, ax = plt.subplots(figsize=(7.2, 4.0))
-    for bench, color, style in (
-        ("lat_send_recv", BLUE, "-"),
-        ("perftest_ib_send_lat", BLUE, "--"),
-        ("lat_rdma_write", ORANGE, "-"),
+    for bench, color, style, label in (
+        ("lat_send_recv", BLUE, "-", "send/recv — this implementation"),
+        ("perftest_ib_send_lat", BLUE, "--", "send/recv — perftest ib_send_lat (its -r stops at 2)"),
+        ("lat_rdma_write", ORANGE, "-", "one-sided write — this implementation, no receive queue to deepen"),
     ):
         series = {d: lat[(bench, SIZE, d)] for d in depths if lat.get((bench, SIZE, d))}
         if series:
-            band(ax, sorted(series), series, color, style, bench)
+            line(ax, sorted(series), series, color, style, label)
 
     ax.set_xscale("log", base=2)
     ax.set_xlabel("receive work requests kept posted")
@@ -168,10 +163,7 @@ def fig_latency_vs_rqdepth(lat):
     ax.annotate("keeping 8 posted is enough;\nkeeping 1 costs twice that",
                 xy=(8, 1.84), xytext=(11, 2.8), fontsize=8, color=INK_2,
                 arrowprops=dict(arrowstyle="-", color=INK_2, linewidth=0.8))
-    legend(ax, [(BLUE, "-", "send/recv — this implementation"),
-                (BLUE, "--", "send/recv — perftest ib_send_lat"),
-                (ORANGE, "-", "one-sided write — this implementation, no receive queue to deepen")],
-           loc="upper right")
+    legend(ax, loc="upper right")
 
     fig.tight_layout()
     out = f"{OUTDIR}/phase1-latency-vs-rq-depth.png"

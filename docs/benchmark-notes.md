@@ -35,11 +35,12 @@ arriving message needs a receive WQE before the NIC can place the payload; with
 one just-posted WR the NIC has to fetch it from host memory, and that fetch sits
 on the critical path.
 
-Pre-posting a batch: **7.81 → 3.89 µs RTT**, within 5% of perftest.
+Pre-posting a batch: **7.81 → 3.89 µs RTT**, within about 5% of perftest.
 
 The confirmation was worth more than the fix. perftest exposes the same setting
 as `-r`, so it could be swept too — and it slows down by the same amount,
-1.85 → 3.57 µs one-way at depth 1. Whatever causes this sits below both
+1.83 → 3.69 µs one-way at the shallow end (its `-r` rounds odd values up, so
+two is as low as it goes). Whatever causes this sits below both
 programs, in the driver or the card. The one-sided write benchmark, which posts
 no receive work requests at all, does not move.
 
@@ -49,11 +50,12 @@ no receive work requests at all, does not move.
   traffic at that size — all pipeline fill, no steady state. Scaling so every
   point moves 256 MB moved perftest further than it moved this implementation
   (19.9 → 28.7 Gbps): the short window had been penalising the reference.
-- **perftest given `-t 16` to match `--depth 16`.** It pairs that with its own
-  `cq_mod = 100`, and 16 outstanding against a completion every hundred is a
-  corner it handles badly. Left at its own default it does 62 Gbps against this
-  implementation's 50 — it wins. Sub-16 KB bandwidth is now reported as not
-  comparable rather than as a result.
+- **perftest given `-t 16` to match `--depth 16`.** It pairs that setting with
+  its own `cq_mod = 100`, and sixteen writes outstanding against a completion
+  every hundred is a corner it handles badly. Run each at its own best instead —
+  perftest at its default depth, this implementation at its maximum of 127 — and
+  at 1 KB perftest does **71.2 Gbps against 62.9**. It wins by 13%. Sub-16 KB
+  bandwidth is now reported as not comparable rather than as a result.
 - **2.2% run-to-run spread, and one 64 KB point swinging 36%**, from a
   `schedutil` governor parking busy-waiting cores at 1.2 GHz. Small messages are
   message-rate bound, so that is exactly where it lands; large transfers are
@@ -82,14 +84,19 @@ perftest has the same barrier, with the reason in the comment
 the next batch. So one setting controlled two things: how many writes could be
 in flight, and how often the pipeline drained to empty. And draining is not
 free — a send completion only arrives once the peer acknowledges. At depth 2
-that is a stall every two messages:
+that is a stall every two messages. At 64 KB:
 
 | depth | before | after | `ib_write_bw` |
 |---|---|---|---|
-| 1 | 59.22 | 59.18 | 58.00 |
-| 2 | 70.77 | **92.40** | 92.39 |
-| 4 | 80.38 | 92.36 | 92.49 |
-| 16 | 88.84 | 92.12 | 92.47 |
+| 1 | 59.22 | 59.30 | 59.53 |
+| 2 | 70.77 | **92.21** | 92.54 |
+| 4 | 80.38 | 92.30 | 92.54 |
+| 16 | 88.84 | 92.03 | 92.54 |
+
+The "after" column and the perftest column are from
+[`results/phase1_sweep.csv`](../results/phase1_sweep.csv); "before" is a run
+from the same session with the old loop, kept because there is nothing else to
+compare against.
 
 Posting against a window and reaping without blocking — what perftest's
 `run_iter_bw` does — closed it. The 16 KB point in the size sweep, which had

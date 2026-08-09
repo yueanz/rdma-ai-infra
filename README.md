@@ -2,7 +2,7 @@
 
 A from-scratch implementation of RDMA communication primitives, transport abstractions, and collective operations — targeting the infrastructure layer of distributed AI training and inference systems.
 
-Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), implementing two end-to-end workloads from raw verbs upward: a mini NCCL-style ring all-reduce and a vLLM-style remote KV cache (prefill via RDMA write, decode via RDMA read).
+Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), implementing two end-to-end workloads from raw verbs upward: a ring all-reduce (chunked reduce-scatter then all-gather, the algorithm NCCL uses), and a remote memory pool handed out in fixed-size slots that clients fill by RDMA write and read back one-sidedly — the transfer path a disaggregated KV cache runs on.
 
 Tested on a real RDMA home lab: two ConnectX-4 NICs, RoCEv2, bare metal, connected back-to-back and isolated into separate network namespaces so each port behaves like an independent host.
 
@@ -11,7 +11,7 @@ Tested on a real RDMA home lab: two ConnectX-4 NICs, RoCEv2, bare metal, connect
 - [x] **Phase 1** — RDMA verbs foundation: RC queue pairs, memory regions, completion queues, send/recv, write, read. Connections come up either through librdmacm or through the INIT → RTR → RTS state machine written out by hand, selectable at runtime; the data path is shared. An earlier round used raw verbs only and had to abandon it — [`docs/raw-verbs-evolution.md`](docs/raw-verbs-evolution.md) is why, and why the hand-written path came back.
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends via rdma_cm, send/recv + write benchmarks; TCP write omitted — no one-sided primitive)
 - [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, RDMA + TCP backends)
-- [x] **Phase 4** — Remote KV Cache (slab allocator over single MR, ctrl/data plane separation, prefill via RDMA write, decode via RDMA read)
+- [x] **Phase 4** — Remote slot pool (slab allocator over a single MR; alloc/free on a control channel, data by one-sided write and read, so the server's CPU is not in the data path)
 - [ ] **Phase 5** — Bare-metal RoCEv2 benchmark (in progress). Re-running the Phase 1–4 benchmarks on real ConnectX-4 hardware over RoCEv2.
 
 ## Hardware & Test Environment
@@ -53,14 +53,17 @@ Step-by-step, and what each step is guarding against:
 ## Architecture
 
 ```
-common/            timing, logging, benchmark stats and CLI shared by every phase
+common/            timing, logging, benchmark stats; the CLI and config the
+                   Phase 1 benchmarks share
 phase1_verbs/      C. RC queue pairs, memory regions, send/recv/write/read, poll.
                    Two ways to bring a connection up — librdmacm, or the
                    INIT→RTR→RTS state machine by hand — behind one call shape.
 phase2_transport/  C++17. One Transport interface over RDMA and TCP backends.
 phase3_collective/ C++17. Ring all-reduce: chunked reduce-scatter + all-gather.
-phase4_kv_cache/   C++17. Slab-allocated remote KV store; prefill writes, decode reads.
-python_bindings/   pybind11 wrapper around Transport, torch.Tensor aware.
+phase4_kv_cache/   C++17. Slab allocator over one MR. Alloc/free control plane,
+                   one-sided data plane; the server is a passive target.
+python_bindings/   pybind11 wrapper around Transport. Registers any buffer-protocol
+                   object (numpy, torch) for RDMA without copying it.
 scripts/           bring-up, benchmark sweep, plotting.
 ```
 
@@ -98,31 +101,40 @@ the same send and receive path.
 
 ## Benchmark Results
 
-Median of five runs per point, with the equivalent perftest tool run at the
-same points on the same link. Latency is one-way throughout: these benchmarks
-report a round trip, perftest halves it before printing, so the two are
-normalised to match.
+Phase 1 only. Phases 2–4 have not been re-run on this hardware yet — that is
+what Phase 5 is.
+
+Median of at least five runs per point, with the equivalent perftest tool run
+at the same points on the same link. Latency is one-way throughout: these
+benchmarks time a round trip, perftest halves it before printing.
 
 - **Latency within 4% of perftest from 256 B up**, bandwidth within 2%
   wherever the link is the bottleneck.
-- **Receive queue depth doubles two-sided latency** — one work request posted
-  instead of eight costs 1.78 → 3.55 µs one-way. perftest degrades by the same
-  amount, so this is the hardware, not the implementation.
-- **One-sided is not the faster one** — 0–8%, and none of it at 1 MB. What it
-  buys is that the far side posts nothing and reaps nothing: CPU, not µs.
+- **Receive queue depth decides how often a slow path gets hit** — one work
+  request posted instead of eight costs 1.78 → 3.56 µs one-way. perftest moves
+  the same way, 1.83 → 3.69: this is the hardware, not the implementation.
+- **One-sided is not the faster one** — 3% at 64 B here, 9% for perftest, and
+  nothing at all by 1 MB. What it buys is that the far side posts no work
+  requests and reaps no completions: CPU, not µs.
 
 ### Receive queue depth
 
 ![latency vs receive queue depth](results/phase1-latency-vs-rq-depth.png)
 
 An arriving message needs a receive work queue entry before the NIC can place
-it. Keep only one posted and the NIC has to go fetch it, on the critical path,
-every time. Eight is enough; past that the curve is flat.
+it. With one posted the NIC often has to go fetch it while the packet is already
+arriving; with eight it almost never does. Past eight the curve is flat.
 
-The one-sided line is there as a check on the machine rather than a comparison
-— it posts no receive work requests, so this knob cannot reach it, and its
-flatness is what says the drop beside it is a real effect and not drift during
-the sweep.
+Nothing gets slower — you just hit the slow case more often. At depth 8 the p99
+is 3.60 µs — about what the median is at depth 1. One slow path, two
+frequencies. It is also why depth 1 is the only point whose median wobbles from
+run to run.
+
+perftest's `-r` rounds odd values up, so its line starts at 2.
+
+The one-sided line posts no receive work requests at all, so this knob cannot
+reach it, and its flatness is what says the drop beside it is a real effect
+rather than drift during the sweep.
 
 ### Latency and bandwidth against perftest
 
@@ -148,7 +160,7 @@ equivalently there, so that range is left out rather than claimed.
 ### Connection setup mode
 
 librdmacm and the hand-written INIT → RTR → RTS path are indistinguishable —
-3.54 vs 3.54 µs send/recv, 92.04 vs 92.03 Gbps — which is the expected answer,
+1.77 vs 1.77 µs send/recv, 92.04 vs 92.03 Gbps — which is the expected answer,
 since setup happens once, before the loop being timed. The result worth having
 is that the state machine is a drop-in for the library, not that it is quicker.
 
@@ -162,4 +174,5 @@ be an error in the measurement. The trail is in
 ## Toolchain
 
 - **OS**: Ubuntu 22.04 LTS
-- **Compiler**: GCC 7+, `-std=c11` (Phase 1), `-std=c++17` (Phase 2+)
+- **Compiler**: GCC 11.4, `-std=c11` (Phase 1), `-std=c++17` (Phase 2+)
+- **Build**: CMake 3.16+
