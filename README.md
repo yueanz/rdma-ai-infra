@@ -8,7 +8,7 @@ Tested on a real RDMA home lab: two ConnectX-4 NICs, RoCEv2, bare metal, connect
 
 ## Phase Status
 
-- [x] **Phase 1** — RDMA Verbs Foundation (RC QP, MR, CQ, send/recv, RDMA write, benchmarks). Uses `rdma_cm` for connection setup — some RDMA fabrics (e.g. iWARP) reject manual `ibv_modify_qp` state transitions, so this project standardizes on `rdma_cm` across all backends. Migration retrospective: [`docs/raw-verbs-evolution.md`](docs/raw-verbs-evolution.md).
+- [x] **Phase 1** — RDMA verbs foundation: RC queue pairs, memory regions, completion queues, send/recv, write, read. Connections come up either through librdmacm or through the INIT → RTR → RTS state machine written out by hand, selectable at runtime; the data path is shared. An earlier round used raw verbs only and had to abandon it — [`docs/raw-verbs-evolution.md`](docs/raw-verbs-evolution.md) is why, and why the hand-written path came back.
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends via rdma_cm, send/recv + write benchmarks; TCP write omitted — no one-sided primitive)
 - [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, RDMA + TCP backends)
 - [x] **Phase 4** — Remote KV Cache (slab allocator over single MR, ctrl/data plane separation, prefill via RDMA write, decode via RDMA read)
@@ -90,13 +90,74 @@ sudo ip netns exec ns2 ./build/phase1_verbs/lat_send_recv 192.168.100.1
 ```
 
 Same shape for the others; `--help` lists the options. Both sides must agree on
-`--size`, `--depth` and `--conn`. `--conn cm|verbs` selects how the queue pair
-is brought up — librdmacm, or the state machine by hand — over an identical
-data path, so a matched pair of runs isolates connection setup and nothing else.
+`--size`, `--depth` and `--conn`.
+
+`--conn` picks who sets the connection up: `cm` hands it to librdmacm, `verbs`
+walks the queue pair through INIT → RTR → RTS in this code. After that both run
+the same send and receive path.
 
 ## Benchmark Results
 
-_Pending — numbers go here as they're collected._
+Median of five runs per point, with the equivalent perftest tool run at the
+same points on the same link. Latency is one-way throughout: these benchmarks
+report a round trip, perftest halves it before printing, so the two are
+normalised to match.
+
+- **Latency within 4% of perftest from 256 B up**, bandwidth within 2%
+  wherever the link is the bottleneck.
+- **Receive queue depth doubles two-sided latency** — one work request posted
+  instead of eight costs 1.78 → 3.55 µs one-way. perftest degrades by the same
+  amount, so this is the hardware, not the implementation.
+- **One-sided is not the faster one** — 0–8%, and none of it at 1 MB. What it
+  buys is that the far side posts nothing and reaps nothing: CPU, not µs.
+
+### Receive queue depth
+
+![latency vs receive queue depth](results/phase1-latency-vs-rq-depth.png)
+
+An arriving message needs a receive work queue entry before the NIC can place
+it. Keep only one posted and the NIC has to go fetch it, on the critical path,
+every time. Eight is enough; past that the curve is flat.
+
+The one-sided line is there as a check on the machine rather than a comparison
+— it posts no receive work requests, so this knob cannot reach it, and its
+flatness is what says the drop beside it is a real effect and not drift during
+the sweep.
+
+### Latency and bandwidth against perftest
+
+![latency vs message size](results/phase1-latency-vs-size.png)
+
+One-way latency in µs, with perftest's figure for the same operation in
+parentheses:
+
+| | 64 B | 4 KB | 64 KB | 1 MB |
+|---|---|---|---|---|
+| send/recv | 1.14 (0.86) | 1.77 (1.80) | 8.45 (8.68) | 94.4 (94.6) |
+| write | 1.11 (0.79) | 1.76 (1.80) | 8.38 (8.56) | 94.5 (94.5) |
+
+64 B is the one place they part: perftest sends a message that small inline,
+riding inside the work request and sparing the NIC a fetch from host memory.
+That is not implemented here and it costs 33–40%.
+
+Write bandwidth reaches 92.4 Gbps at 16 KB, 91.9 at 64 KB and 90.7 at 1 MB
+(`ib_write_bw`: 92.5, 92.5, 92.6). Below 16 KB neither tool is link-bound and
+the result turns on how each one pipelines; they are not configured
+equivalently there, so that range is left out rather than claimed.
+
+### Connection setup mode
+
+librdmacm and the hand-written INIT → RTR → RTS path are indistinguishable —
+3.54 vs 3.54 µs send/recv, 92.04 vs 92.03 Gbps — which is the expected answer,
+since setup happens once, before the loop being timed. The result worth having
+is that the state machine is a drop-in for the library, not that it is quicker.
+
+---
+
+Several of these numbers were wrong first, including three separate occasions
+where this implementation appeared to beat perftest and every one turned out to
+be an error in the measurement. The trail is in
+[`docs/benchmark-notes.md`](docs/benchmark-notes.md).
 
 ## Toolchain
 
