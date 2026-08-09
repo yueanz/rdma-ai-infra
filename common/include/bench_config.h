@@ -17,7 +17,8 @@ typedef struct bench_config {
     int             port;
     int             iters;
     int             size;
-    int             depth;      /* in-flight WRs; bandwidth benchmarks only */
+    int             depth;      /* WRs kept in flight: send window (bandwidth)
+                                   or receive queue depth (lat_send_recv) */
     rai_conn_mode_t conn;
     int             csv;        /* emit one machine-readable row instead */
     int             csv_header; /* print the header and exit */
@@ -42,8 +43,9 @@ static inline void bench_config_usage(const char *prog) {
     printf("  --port <port>     default 12345 (port+1 carries the OOB exchange)\n");
     printf("  --iters <n>       default 1000\n");
     printf("  --size <bytes>    default 4096\n");
-    printf("  --depth <n>       default 16, max %d (bandwidth benchmarks only)\n",
-           RAI_QP_MAX_WR);
+    printf("  --depth <n>       default 16, max %d. WRs kept in flight: send window for\n"
+           "                    bandwidth tests, receive queue depth for lat_send_recv\n",
+           RAI_QP_MAX_WR - 1);
     printf("  --conn cm|verbs   default cm\n");
     printf("  --csv             emit one CSV row instead of a table\n");
     printf("  --csv-header      print the CSV header and exit\n");
@@ -111,8 +113,10 @@ static inline int bench_config_parse(int argc, char *argv[], bench_config_t *cfg
         printf("--size must be >= 1\n");
         return -1;
     }
-    if (cfg->depth < 1 || cfg->depth > RAI_QP_MAX_WR) {
-        printf("--depth must be 1..%d\n", RAI_QP_MAX_WR);
+    /* A work queue is a ring buffer that keeps one slot free to tell full from
+     * empty, so the last of RAI_QP_MAX_WR entries can never be posted. */
+    if (cfg->depth < 1 || cfg->depth >= RAI_QP_MAX_WR) {
+        printf("--depth must be 1..%d\n", RAI_QP_MAX_WR - 1);
         return -1;
     }
     return 0;
@@ -133,8 +137,8 @@ static inline void bench_report_latency(const char *name, const char *label,
         return;
     }
     lat_stats_t s = latency_stats(sorted, n);
-    printf("%s,%s,%d,,%d,%.3f,%.3f,%.3f,%.3f,\n",
-           name, bench_conn_name(cfg), cfg->size, cfg->iters,
+    printf("%s,%s,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,\n",
+           name, bench_conn_name(cfg), cfg->size, cfg->depth, cfg->iters,
            s.min_us, s.median_us, s.p99_us, s.max_us);
 }
 

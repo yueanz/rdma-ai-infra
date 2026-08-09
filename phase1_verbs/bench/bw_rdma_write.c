@@ -7,14 +7,15 @@
 #include "bench_config.h"
 #include "logging.h"
 
+#define CQ_POLL_BATCH 16
+
 int main(int argc, char *argv[]) {
-    int ret = 1, i;
+    int ret = 1;
     uint64_t bw_start = 0, total_time;
     bench_config_t cfg;
     rai_mr_t mr = {0};
     rai_qp_t qp = {0};
     volatile uint8_t *doorbell;
-    uint32_t send_flags;
     int mr_listen_fd = -1;
 
     bench_config_init(&cfg);
@@ -78,32 +79,51 @@ int main(int argc, char *argv[]) {
         while (*doorbell == 0)
             CPU_RELAX();
     } else {
-        // client side: only set doorbell on the last iteration
+        /* Keep `depth` writes outstanding, rather than posting `depth` and then
+         * blocking until they drain. A send completion only arrives once the
+         * peer has acknowledged, so blocking for one empties the pipeline every
+         * `depth` writes and leaves the link idle for that ack — which is why
+         * small depths used to fall far short of line rate. Post against a
+         * window and reap without blocking, the way perftest's run_iter_bw
+         * does, and depth means "how much is in flight" and nothing else. */
+        struct ibv_wc wc[CQ_POLL_BATCH];
+        uint64_t scnt = 0, ccnt = 0;
+
         *doorbell = 0;
-        for (i = 0; i < total_iters; i++) {
-            if (i == total_iters - 1) *doorbell = 1;
-            if (i == kWarmup) bw_start = time_now_ns();  // start bandwidth timer after warmup
-            send_flags = ((i+1) % cfg.depth == 0 || i == total_iters-1) ? IBV_SEND_SIGNALED : 0;
-            if (rai_post_write(&qp, &mr, cfg.size, send_flags,
-                            qp.remote.addr, qp.remote.rkey, 1, 0) != 0) {
-                LOG_ERR("rdma post write failed");
+        while (ccnt < (uint64_t)total_iters) {
+            while (scnt < (uint64_t)total_iters &&
+                   scnt - ccnt < (uint64_t)cfg.depth) {
+                if (scnt == (uint64_t)total_iters - 1) *doorbell = 1;
+                if (scnt == (uint64_t)kWarmup) bw_start = time_now_ns();
+                if (rai_post_write(&qp, &mr, cfg.size, IBV_SEND_SIGNALED,
+                                qp.remote.addr, qp.remote.rkey, 1, 0) != 0) {
+                    LOG_ERR("rdma post write failed");
+                    goto out;
+                }
+                scnt++;
+            }
+            int ne = ibv_poll_cq(qp.cq, CQ_POLL_BATCH, wc);
+            if (ne < 0) {
+                LOG_ERR("ibv_poll_cq failed");
                 goto out;
             }
-            if ((send_flags & IBV_SEND_SIGNALED) && rai_poll_cq(&qp, NULL) != 0) {
-                LOG_ERR("rdma poll completion queue failed");
-                goto out;
+            for (int k = 0; k < ne; k++) {
+                if (wc[k].status != IBV_WC_SUCCESS) {
+                    LOG_ERR("write completion error: %s", ibv_wc_status_str(wc[k].status));
+                    goto out;
+                }
             }
+            ccnt += (uint64_t)ne;
         }
         total_time = time_elapsed_ns(bw_start, time_now_ns());
         bench_report_bandwidth("bw_rdma_write", "rdma write throughput",
                                &cfg, (uint64_t)cfg.size*cfg.iters, total_time);
     }
 
-    /* The doorbell only tells the server that the last write's *data* landed.
-     * RC may still owe ACKs for the unsignaled writes behind it, so a server
-     * that tears down here leaves the client retrying into a dead QP until
-     * IBV_WC_RETRY_EXC_ERR. Hold both sides until the client has reaped every
-     * completion. */
+    /* The doorbell only tells the server that the last write's *data* landed,
+     * which happens before the client has reaped the matching completion. A
+     * server that tears down at that point strands the client mid-ack, so hold
+     * both sides until the client is actually done. */
     if (cfg.server_ip == NULL) {
         if (rai_oob_accept(mr_listen_fd, &qp) != 0) {
             LOG_ERR("teardown sync failed");
