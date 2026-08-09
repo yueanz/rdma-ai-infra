@@ -2,13 +2,23 @@
 
 A from-scratch implementation of RDMA communication primitives, transport abstractions, and collective operations — targeting the infrastructure layer of distributed AI training and inference systems.
 
-Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks), implementing two end-to-end workloads from raw verbs upward: a ring all-reduce (chunked reduce-scatter then all-gather, the algorithm NCCL uses), and a remote memory pool handed out in fixed-size slots that clients fill by RDMA write and read back one-sidedly — the transfer path a disaggregated KV cache runs on.
+Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks). On top of
+the verbs layer sit two end-to-end workloads: a ring all-reduce (chunked
+reduce-scatter then all-gather, the algorithm NCCL uses), and a remote memory
+pool that clients fill by RDMA write and read back one-sidedly — the transfer
+path a disaggregated KV cache runs on.
 
-Tested on a real RDMA home lab: two ConnectX-4 NICs, RoCEv2, bare metal, connected back-to-back and isolated into separate network namespaces so each port behaves like an independent host.
+Tested on a real RDMA home lab — two ConnectX-4 NICs, RoCEv2, bare metal,
+back-to-back, each port in its own network namespace so it behaves as an
+independent host — and measured against perftest: latency within 4% at every
+message size, bandwidth within 2% wherever the link is the bottleneck.
 
 ## Phase Status
 
-- [x] **Phase 1** — RDMA verbs foundation: RC queue pairs, memory regions, completion queues, send/recv, write, read. Connections come up either through librdmacm or through the INIT → RTR → RTS state machine written out by hand, selectable at runtime; the data path is shared. An earlier round used raw verbs only and had to abandon it — [`docs/raw-verbs-evolution.md`](docs/raw-verbs-evolution.md) is why, and why the hand-written path came back.
+- [x] **Phase 1** — RDMA verbs foundation: RC queue pairs, memory regions,
+  completion queues, send/recv, write, read, inline send. Connections come up
+  either through librdmacm or through a hand-written INIT → RTR → RTS state
+  machine, selectable at runtime; the data path is shared.
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends via rdma_cm, send/recv + write benchmarks; TCP write omitted — no one-sided primitive)
 - [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, RDMA + TCP backends)
 - [x] **Phase 4** — Remote slot pool (slab allocator over a single MR; alloc/free on a control channel, data by one-sided write and read, so the server's CPU is not in the data path)
