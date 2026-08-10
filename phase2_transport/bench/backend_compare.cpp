@@ -12,9 +12,10 @@
 
 
 /* Page-aligned benchmark buffer, matching rai_mr_reg's own allocation. A heap
- * vector lands at an arbitrary offset and usually straddles a page boundary,
- * so the NIC pays two IOTLB lookups per DMA — measured as ~0.5 us on the 4 KB
- * round trip against phase 1. */
+ * vector lands at an arbitrary offset and usually straddles a page boundary;
+ * aligning it was worth ~0.5 us on the 4 KB round trip, measured against
+ * phase 1. Straddling means the NIC touches two pages per DMA, which is the
+ * obvious explanation, but that mechanism was inferred and not measured. */
 struct AlignedBuf {
     char *p = nullptr;
     int init(size_t len) {
@@ -35,12 +36,14 @@ struct Config
     int iters = 1000;
     int size = 4096;
     bool is_rdma = false;
+    bool csv = false;         /* one machine-readable row instead of tables */
+    bool csv_header = false;  /* print the CSV header and exit */
 };
 
 static void config_usage(const char *prog) {
     fprintf(stderr, "Usage:\n");
     fprintf(stderr, "  server: %s <rdma|tcp> [--port <p>] [--iters <n>] [--size <bytes>]\n", prog);
-    fprintf(stderr, "  client: %s <rdma|tcp> <server_ip> [--port <p>] [--iters <n>] [--size <bytes>]\n", prog);
+    fprintf(stderr, "  client: %s <rdma|tcp> <server_ip> [--port <p>] [--iters <n>] [--size <bytes>] [--csv]\n", prog);
 }
 
 static int config_parse(int argc, char *argv[], Config *cfg) {
@@ -68,6 +71,10 @@ static int config_parse(int argc, char *argv[], Config *cfg) {
                 return -1;
             }
             cfg->size = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--csv") == 0) {
+            cfg->csv = true;
+        } else if (strcmp(argv[i], "--csv-header") == 0) {
+            cfg->csv_header = true;
         } else if (argv[i][0] != '-') {
             cfg->server_ip = argv[i];
         } else {
@@ -242,6 +249,20 @@ int run_client_sendrecv(Transport *t, Config &cfg) {
 
     uint64_t total_time = time_elapsed_ns(bw_start, time_now_ns());
     std::sort(latencies.begin(), latencies.end());
+    if (cfg.csv) {
+        lat_stats_t st = latency_stats(latencies.data(), cfg.iters);
+        /* depth is the receive-queue depth kept posted; TCP has no such
+         * concept, so it stays empty rather than being given a made-up 1. */
+        if (cfg.is_rdma)
+            printf("sendrecv,rdma,%d,%d,%d,%.2f,%.2f,%.2f,%.2f,\n",
+                   cfg.size, prepost, cfg.iters,
+                   st.min_us, st.median_us, st.p99_us, st.max_us);
+        else
+            printf("sendrecv,tcp,%d,,%d,%.2f,%.2f,%.2f,%.2f,\n",
+                   cfg.size, cfg.iters,
+                   st.min_us, st.median_us, st.p99_us, st.max_us);
+        return 0;
+    }
     print_latency(cfg.is_rdma ? "send/recv latency RTT (rdma)" : "send/recv latency RTT (tcp)", latencies.data(), cfg.iters);
     print_bandwidth(cfg.is_rdma ? "send/recv throughput (rdma)" : "send/recv throughput (tcp)", (uint64_t)cfg.size*cfg.iters, total_time);
     return 0;
@@ -363,6 +384,12 @@ int run_client_write(Transport *t, Config &cfg) {
     std::sort(latencies.begin(), latencies.end());
     /* run_client_write only runs in is_rdma=true mode (TCP write is skipped
      * in main; see the explanation in main()'s write block). */
+    if (cfg.csv) {
+        lat_stats_t st = latency_stats(latencies.data(), cfg.iters);
+        printf("write_ack,rdma,%d,1,%d,%.2f,%.2f,%.2f,%.2f,\n",
+               cfg.size, cfg.iters, st.min_us, st.median_us, st.p99_us, st.max_us);
+        return 0;
+    }
     print_latency("write latency (rdma)", latencies.data(), cfg.iters);
     print_bandwidth("rdma write throughput", (uint64_t)cfg.size*cfg.iters, total_time);
     return 0;
@@ -375,6 +402,12 @@ int main(int argc, char *argv[]) {
         config_usage(argv[0]);
         return 1;
     }
+    if (cfg.csv_header) {
+        /* Same column order as phase 1's BENCH_CSV_HEADER (bench_config.h):
+         * bench,conn,size,depth,iters,min_us,median_us,p99_us,max_us,gbps */
+        printf("bench,conn,size,depth,iters,min_us,median_us,p99_us,max_us,gbps\n");
+        return 0;
+    }
 
     try {
         bool is_server = cfg.server_ip.empty();
@@ -383,7 +416,7 @@ int main(int argc, char *argv[]) {
             std::unique_ptr<Transport> t(
                 cfg.is_rdma ? create_rdma_transport() : create_tcp_transport()
             );
-            printf("=== send/recv [%s] ===\n", cfg.is_rdma ? "rdma" : "tcp");
+            if (!cfg.csv) printf("=== send/recv [%s] ===\n", cfg.is_rdma ? "rdma" : "tcp");
             if (is_server) {
                 if (run_server_sendrecv(t.get(), cfg) != 0) {
                     LOG_ERR("run_server_sendrecv failed");
@@ -402,7 +435,7 @@ int main(int argc, char *argv[]) {
         // 2-sided send/recv with explicit ACK, so we omit it).
         if (cfg.is_rdma) {
             std::unique_ptr<Transport> t(create_rdma_transport());
-            printf("=== write [rdma] ===\n");
+            if (!cfg.csv) printf("=== write [rdma] ===\n");
             cfg.port += 2;  // avoid TIME_WAIT conflict with sendrecv
             if (is_server) {
                 if (run_server_write(t.get(), cfg) != 0) {
@@ -417,7 +450,7 @@ int main(int argc, char *argv[]) {
             }
             cfg.port -= 2;
         } else {
-            printf("=== write [tcp] === SKIPPED: TCP has no one-sided write primitive\n");
+            if (!cfg.csv) printf("=== write [tcp] === SKIPPED: TCP has no one-sided write primitive\n");
         }
     } catch (const std::exception &e) {
         fprintf(stderr, "error: %s\n", e.what());

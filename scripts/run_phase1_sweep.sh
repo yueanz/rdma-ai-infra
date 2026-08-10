@@ -53,17 +53,21 @@ if [ ! -x "$BIN/lat_send_recv" ]; then
     exit 1
 fi
 
-# irqbalance migrates the NIC interrupts mid-run, which shows up as jitter.
+# Stopping irqbalance and pinning the governor were measured together on this
+# box (RDMA send/recv, 5 runs a point): leaving both at their defaults costs
+# +4% at 64 B, +11% at 1 KB, +3.5% at 16 KB, and nothing by 256 KB, and widens
+# the run-to-run spread at 16 KB from 0.3% to 2.7%. The two were not varied
+# separately, so which one earns which share is unmeasured.
 IRQBALANCE_WAS_ACTIVE=0
 if systemctl is-active --quiet irqbalance 2>/dev/null; then
     IRQBALANCE_WAS_ACTIVE=1
     systemctl stop irqbalance
 fi
 
-# Small messages are message-rate bound, so the cost is the CPU posting work
-# requests — and a scaling governor parks idle-looking cores at their minimum
-# while a busy-wait benchmark runs on them. Large transfers are link bound and
-# barely notice; everything below ~16 KB does.
+# The mechanism for the governor half: small messages are message-rate bound,
+# so the cost is the CPU posting work requests, and a scaling governor parks a
+# core that is busy-waiting rather than obviously busy. Large transfers are
+# link bound and stop caring somewhere between 16 KB and 256 KB.
 GOV_SAVED=""
 if [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
     GOV_SAVED=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)

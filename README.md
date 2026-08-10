@@ -40,10 +40,6 @@ The two ports are wired straight to each other. Each device then goes into its
 own network namespace, so one host behaves like two independent peers — and so
 two NICs on one L2 segment cannot confuse each other's ARP.
 
-```bash
-sudo bash scripts/setup_netns.sh     # idempotent; nothing here survives a reboot
-```
-
 | | |
 |---|---|
 | NICs | 2× Mellanox ConnectX-4 (MT27700), 100GbE |
@@ -86,14 +82,28 @@ cmake -B build && cmake --build build -j   # just the build, deps already in pla
 
 Defaults to `RelWithDebInfo`; pass `-DCMAKE_BUILD_TYPE=Debug` for gdb work.
 
+## Namespace Setup
+
+This has to be re-run after every reboot:
+
+```bash
+sudo bash scripts/setup_netns.sh     # idempotent
+```
+
 ## Running Benchmarks
 
 The whole sweep, against perftest at the same points, plus the figures:
 
 ```bash
 sudo bash scripts/run_phase1_sweep.sh   # ~10 min -> results/phase1_sweep.csv
+sudo bash scripts/run_phase2_sweep.sh   # ~6 min  -> results/phase2_sweep.csv
 python3 scripts/plot_phase1.py          # -> results/*.png
+python3 scripts/plot_phase2.py
 ```
+
+The phase 2 sweep changes system-wide settings while it runs — CPU governor,
+irqbalance, NIC interrupt moderation, busy-poll sysctls — and puts them back
+on exit.
 
 One benchmark on its own — server in `ns1`, client in `ns2`:
 
@@ -111,12 +121,16 @@ the same send and receive path.
 
 ## Benchmark Results
 
-Phase 1 only. Phases 2–4 have not been re-run on this hardware yet — that is
+Phases 1 and 2. Phases 3–4 have not been re-run on this hardware yet — that is
 what Phase 5 is.
 
+Latency is one-way throughout: these benchmarks time a round trip and halve it,
+which is what perftest does before printing.
+
+### Phase 1 — verbs against perftest
+
 Median of at least five runs per point, with the equivalent perftest tool run
-at the same points on the same link. Latency is one-way throughout: these
-benchmarks time a round trip, perftest halves it before printing.
+at the same points on the same link.
 
 - **Latency within 4% of perftest at every size**, bandwidth within 2%
   wherever the link is the bottleneck.
@@ -173,6 +187,36 @@ librdmacm and the hand-written INIT → RTR → RTS path measure the same —
 1.77 vs 1.77 µs send/recv, 92.03 vs 92.05 Gbps. Setup runs once, before the
 timed loop, so it cannot show up in the numbers; identical numbers mean the
 hand-written path got every QP parameter right.
+
+### Phase 2 — the same interface over RDMA and TCP
+
+Median of 15 runs per point. TCP is measured twice: once tuned for latency
+(`TCP_NODELAY`, interrupt moderation turned down, busy polling so `recv()`
+spins instead of sleeping) and once at stock settings. The gap is quoted against
+whichever configuration measured better at that size, so the comparison never
+leans on a badly configured TCP.
+
+![RDMA vs TCP through one interface](results/phase2-rdma-vs-tcp.png)
+
+- **A C++ interface over the verbs layer costs under 2%** at every size — 0.90
+  vs 0.88 µs at 64 B, 94.6 vs 94.5 at 1 MB against phase 1's bare verbs.
+- **RDMA is 2.4–5.0× faster than the better TCP configuration.** The gap is
+  widest for small messages, where fixed per-message cost dominates, and
+  narrowest at 1 MB, where both are moving bytes.
+- **It is also far steadier.** Run to run, RDMA's median moves 0.0% (IQR);
+  TCP's moves 8–10%. Per message, **RDMA's p99 is below TCP's median at every
+  size** — its bad case beats TCP's typical case.
+
+| | 64 B | 4 KB | 64 KB | 1 MB |
+|---|---|---|---|---|
+| RDMA | 0.90 | 1.79 | 8.70 | 94.6 |
+| TCP, tuned | 4.47 | 7.26 | 33.9 | 226 |
+| TCP, stock | 7.83 | 19.3 | 42.0 | 267 |
+
+Both TCP configurations pay for the interrupt path — a traced run makes 8022
+wakeups where the polling one makes 3 — while RDMA takes no interrupt on the
+data path at all. The stock line also varies about 2.4× at 4 KB and 16 KB; the
+cause was not established, and no number above depends on that arm.
 
 ---
 
