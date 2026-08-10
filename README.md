@@ -22,7 +22,7 @@ message size, bandwidth within 2% wherever the link is the bottleneck.
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends via rdma_cm, send/recv + write benchmarks; TCP write omitted — no one-sided primitive)
 - [x] **Phase 3** — Ring All-Reduce (ring reduce-scatter + all-gather over the Phase 2 interface, RDMA + TCP backends)
 - [x] **Phase 4** — Remote slot pool (slab allocator over a single MR; alloc/free on a control channel, data by one-sided write and read, so the server's CPU is not in the data path)
-- [ ] **Phase 5** — Bare-metal RoCEv2 benchmark (in progress). Re-running the earlier phases on real ConnectX-4 hardware over RoCEv2; 1 to 3 are done, 4 is not.
+- [x] **Phase 5** — Bare-metal RoCEv2 benchmark. All four earlier phases re-run on real ConnectX-4 hardware over RoCEv2; the numbers below are from that hardware.
 
 ## Hardware & Test Environment
 
@@ -98,9 +98,11 @@ The whole sweep, against perftest at the same points, plus the figures:
 sudo bash scripts/run_phase1_sweep.sh   # ~10 min -> results/phase1_sweep.csv
 sudo bash scripts/run_phase2_sweep.sh   # ~6 min  -> results/phase2_sweep.csv
 sudo bash scripts/run_phase3_sweep.sh   # ~13 min -> results/phase3_sweep.csv
+sudo bash scripts/run_phase4_sweep.sh   # ~3 min  -> results/phase4_sweep.csv
 python3 scripts/plot_phase1.py          # -> results/*.png
 python3 scripts/plot_phase2.py
 python3 scripts/plot_phase3.py
+python3 scripts/plot_phase4.py
 ```
 
 The phase 2 sweep changes system-wide settings while it runs — CPU governor,
@@ -123,8 +125,7 @@ the same send and receive path.
 
 ## Benchmark Results
 
-Phases 1 to 3. Phase 4 has not been re-run on this hardware yet — that is what
-Phase 5 is.
+All four phases, re-run on this hardware — that is what Phase 5 is.
 
 Phase 1 and 2 report one-way latency: those benchmarks time a round trip and
 halve it, which is what perftest does before printing. Phase 3 reports the time
@@ -258,12 +259,42 @@ starts at 4 MB and is gradual, and the transfer half slows down with it (84
 Gbps of payload at 4 MB, 63 at 16 MB). Both halves lose ground as the buffers
 leave cache; which mechanism does it was not isolated.
 
----
+### Phase 4 — one-sided access to a remote slot
 
-Several of these numbers were wrong first, including three separate occasions
-where this implementation appeared to beat perftest and every one turned out to
-be an error in the measurement. The trail is in
-[`docs/benchmark-notes.md`](docs/benchmark-notes.md).
+Median of 15 runs per point. A client allocates a slot over the TCP control
+channel, then writes a KV block into it and reads it back with RDMA write and
+read. The server takes no part in either transfer — it sits in its control
+loop — so there is no TCP arm here: TCP has no one-sided primitive, and making
+the server receive would measure something else rather than the same thing
+more slowly.
+
+![One-sided write and read against a remote slot](results/phase4-oneside.png)
+
+- **One write at a time already fills the link** — 91.4 Gbps at 4 MB against
+  the 92.4 phase 1 reached with a queue depth. Sixteen at once adds 4%.
+- **Read does not, and concurrency only rescues the small ones.** A lone 4 MB
+  read gets 53.0 Gbps and sixteen at once gets 54.5; at 4 KB the same change
+  takes it from 13.4 to 43.1. What holds large reads at ~53 Gbps was not
+  established.
+- **Both are steady** — at one operation outstanding the median moves 0.21%
+  run to run for write and 0.09% for read, the tightest of the four phases,
+  which is what a data path the peer's CPU never touches should look like.
+
+| slot | 4 KB | 64 KB | 1 MB | 4 MB |
+|---|---|---|---|---|
+| write, µs | 2.09 | 8.69 | 94.70 | 366.96 |
+| read, µs | 2.40 | 12.07 | 159.68 | 632.91 |
+| write, Gbps | 15.4 | 59.1 | 88.4 | 91.4 |
+| read, Gbps | 13.4 | 42.8 | 52.5 | 53.0 |
+
+The gap grows with size — 0.3 µs at 4 KB, 266 µs at 4 MB — so it is the
+response stream running slower, not the round trip a read needs before its data
+can start. The queue pair's read limit is ruled out: `max_rd_atomic` is at this
+HCA's maximum of 16, worth 2.8× on a 4 KB read with sixteen outstanding and
+nothing on a 4 MB one. Table figures are for one operation outstanding, the
+access pattern a decode step has.
+
+---
 
 ## Future Work
 
@@ -271,6 +302,15 @@ be an error in the measurement. The trail is in
 all-reduce here and 53% of a 16 MB one, with the link idle throughout. NCCL
 fuses receive, reduce and send into one primitive; this does them in sequence.
 On these numbers it is the larger of the two things left on the table.
+
+**A test suite.** Correctness is currently checked inside the benchmarks — the
+all-reduce verifies its sums, the KV client round-trips a pattern through a
+remote slot before timing anything — which is where two real bugs turned up,
+but it is the wrong place for it. The checks only run when a benchmark runs,
+they need both namespaces up, and nothing covers the pieces underneath: queue
+pair state transitions, MR registration, `exchange_buf`, slab alloc/free. A
+`tests/` target under CTest with a fixture that brings the namespaces up would
+cover all four phases and take about as long as one of them.
 
 **Send/recv over one-sided writes.** NCCL's IB transport moves no data with
 `IBV_WR_SEND` — the receiver writes a descriptor into the sender's memory and

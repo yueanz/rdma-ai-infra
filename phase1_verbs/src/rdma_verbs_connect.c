@@ -174,7 +174,7 @@ static int qp_to_rts(rai_qp_t *qp) {
     attr.path_mtu           = port_attr.active_mtu;
     attr.dest_qp_num        = qp->remote.qpn;
     attr.rq_psn             = qp->remote.psn;
-    attr.max_dest_rd_atomic = 1;
+    attr.max_dest_rd_atomic = 16;  /* see rdma_cm_connect.c */
     /* 31 (~491ms per retry) matches what the CM path sets after rdma_accept,
      * so a CM-vs-verbs comparison isn't skewed by different RNR budgets. */
     attr.min_rnr_timer      = 12;   /* 0.64 ms; see rdma_cm_connect.c */
@@ -193,7 +193,7 @@ static int qp_to_rts(rai_qp_t *qp) {
     memset(&attr, 0, sizeof(attr));
     attr.qp_state      = IBV_QPS_RTS;
     attr.sq_psn        = qp->local.psn;
-    attr.max_rd_atomic = 1;
+    attr.max_rd_atomic = 16;       /* see rdma_cm_connect.c */
     attr.timeout       = 14;
     attr.retry_cnt     = 7;
     attr.rnr_retry     = 7;

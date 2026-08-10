@@ -120,8 +120,15 @@ int rai_cm_accept_qp(rai_qp_t *qp) {
 
     struct rdma_conn_param cp = {0};
 
-    cp.responder_resources = 1;  /* max concurrent inbound RDMA reads we'll serve */
-    cp.initiator_depth     = 1;  /* max concurrent outbound RDMA reads we'll issue */
+    /* 16 is this HCA's max_qp_rd_atom. At 1 -- the value that looks safe --
+     * the queue pair carries one RDMA read at a time however many are posted,
+     * so concurrency buys nothing. Measured with 16 reads outstanding, going
+     * from 1 to 16 takes a 4 KB read from 15.6 to 43.1 Gbps and a 64 KB read
+     * from 44.4 to 52.7; a 4 MB read does not move, so whatever limits large
+     * reads to ~53 Gbps is something else. Writes are identical either way --
+     * this governs reads and atomics only, which is what the A/B showed. */
+    cp.responder_resources = 16;  /* concurrent inbound RDMA reads we serve */
+    cp.initiator_depth     = 16;  /* concurrent outbound RDMA reads we issue */
     cp.rnr_retry_count     = 7;  /* 7 = retry forever, matching the verbs path */
     if (rdma_accept(conn_id, &cp) != 0) {
         LOG_ERR("rai_cm_accept_qp failed: rdma_accept failed");
@@ -199,8 +206,8 @@ int rai_cm_connect_qp(rai_qp_t *qp, const char *server_ip, int port) {
         goto out;
     }
 
-    cp.responder_resources = 1;
-    cp.initiator_depth = 1;
+    cp.responder_resources = 16;  /* see the accept path above */
+    cp.initiator_depth = 16;
     cp.rnr_retry_count = 7;  /* 7 = retry forever, matching the verbs path */
     if (rdma_connect(id, &cp) != 0) {
         LOG_ERR("rai_cm_connect_qp failed: rdma_connect failed");
