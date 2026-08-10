@@ -95,7 +95,9 @@ def figure(us, bw):
     ax_t.set_ylabel("time per operation (µs)")
     ax_t.set_title("One-sided access to a remote slot, server CPU uninvolved",
                    fontsize=10.5, loc="left")
-    ax_t.legend(loc="upper left", frameon=False, fontsize=8.5)
+    # handlelength: at the default the sample line is too short to fit a
+    # dash period, so a dashed series reads as solid in the key.
+    ax_t.legend(loc="upper left", frameon=False, fontsize=8.5, handlelength=3.2)
 
     ax_b.set_ylim(0, 108)
     ax_b.set_ylabel("rate (Gbps)")
@@ -105,7 +107,7 @@ def figure(us, bw):
                   textcoords="offset points", fontsize=8, color=INK_2)
     # Lower right: the link marker sits top left and every curve rises
     # from the left, so that corner is the only clear one.
-    ax_b.legend(loc="lower right", frameon=False, fontsize=8)
+    ax_b.legend(loc="lower right", frameon=False, fontsize=8, handlelength=3.2)
 
     fig.tight_layout()
     out = f"{OUTDIR}/phase4-oneside.png"

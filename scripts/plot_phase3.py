@@ -100,7 +100,10 @@ def figure(us, bw):
     ax_t.set_ylabel("all-reduce time (µs)")
     ax_t.set_title("Ring all-reduce, two ranks, one interface over two backends",
                    fontsize=10.5, loc="left")
-    ax_t.legend(loc="upper left", frameon=False, fontsize=8.5)
+    # handlelength: at the default the sample line is too short to fit a
+    # dash period, so a dashed series is indistinguishable from a solid
+    # one in the key. Phase 1 and 2 set the same.
+    ax_t.legend(loc="upper left", frameon=False, fontsize=8.5, handlelength=3.2)
 
     # The gap at each end, against whichever TCP configuration measured better.
     for s in (sizes[0], sizes[-1]):

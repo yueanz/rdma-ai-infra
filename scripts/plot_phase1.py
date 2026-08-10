@@ -140,7 +140,7 @@ def fig_latency_vs_rqdepth(lat):
     fig, ax = plt.subplots(figsize=(7.2, 4.0))
     for bench, color, style, label in (
         ("lat_send_recv", BLUE, "-", "send/recv — this implementation"),
-        ("perftest_ib_send_lat", BLUE, "--", "send/recv — perftest ib_send_lat (its -r stops at 2)"),
+        ("perftest_ib_send_lat", BLUE, "--", "send/recv — perftest ib_send_lat (odd -r rounds up, so 1 lands on 2)"),
         ("lat_rdma_write", ORANGE, "-", "one-sided write — this implementation, no receive queue to deepen"),
     ):
         series = {d: lat[(bench, SIZE, d)] for d in depths if lat.get((bench, SIZE, d))}
