@@ -122,6 +122,7 @@ int rai_cm_accept_qp(rai_qp_t *qp) {
 
     cp.responder_resources = 1;  /* max concurrent inbound RDMA reads we'll serve */
     cp.initiator_depth     = 1;  /* max concurrent outbound RDMA reads we'll issue */
+    cp.rnr_retry_count     = 7;  /* 7 = retry forever, matching the verbs path */
     if (rdma_accept(conn_id, &cp) != 0) {
         LOG_ERR("rai_cm_accept_qp failed: rdma_accept failed");
         return -1;
@@ -189,6 +190,7 @@ int rai_cm_connect_qp(rai_qp_t *qp, const char *server_ip, int port) {
 
     cp.responder_resources = 1;
     cp.initiator_depth = 1;
+    cp.rnr_retry_count = 7;  /* 7 = retry forever, matching the verbs path */
     if (rdma_connect(id, &cp) != 0) {
         LOG_ERR("rai_cm_connect_qp failed: rdma_connect failed");
         goto out;

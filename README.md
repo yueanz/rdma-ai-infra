@@ -169,10 +169,10 @@ equivalently there, so that range is left out rather than claimed.
 
 ### Connection setup mode
 
-librdmacm and the hand-written INIT → RTR → RTS path are indistinguishable —
-1.77 vs 1.77 µs send/recv, 92.03 vs 92.05 Gbps — which is the expected answer,
-since setup happens once, before the loop being timed. The result worth having
-is that the state machine is a drop-in for the library, not that it is quicker.
+librdmacm and the hand-written INIT → RTR → RTS path measure the same —
+1.77 vs 1.77 µs send/recv, 92.03 vs 92.05 Gbps. Setup runs once, before the
+timed loop, so it cannot show up in the numbers; identical numbers mean the
+hand-written path got every QP parameter right.
 
 ---
 

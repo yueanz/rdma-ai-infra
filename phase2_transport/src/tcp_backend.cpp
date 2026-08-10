@@ -3,7 +3,16 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
+
+/* Latency benchmark: never let Nagle batch a ping while delayed ACK sits on
+ * the pong. Applied to every data socket, both sides. */
+static void set_nodelay(int fd) {
+    int one = 1;
+    if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) < 0)
+        LOG_INFO("TCP_NODELAY failed (continuing)");
+}
 
 static int send_all(int fd, const void *buf, size_t len) {
     ssize_t n;
@@ -165,6 +174,7 @@ int TcpTransport::connect(const char *host, int port) {
         fd_ = -1;
         return -1;
     }
+    set_nodelay(fd_);
     is_server_ = false;
     return 0;
 }
@@ -208,6 +218,7 @@ int TcpTransport::accept() {
         LOG_ERR("tcp accept failed: accept failed");
         return -1;
     }
+    set_nodelay(fd_);
     return 0;
 }
 
