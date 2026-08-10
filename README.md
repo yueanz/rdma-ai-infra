@@ -261,6 +261,21 @@ where this implementation appeared to beat perftest and every one turned out to
 be an error in the measurement. The trail is in
 [`docs/benchmark-notes.md`](docs/benchmark-notes.md).
 
+## Future Work
+
+**Overlapping the summation with the transfer.** The sum is 36% of a 4 MB
+all-reduce here and 53% of a 16 MB one, with the link idle throughout. NCCL
+fuses receive, reduce and send into one primitive; this does them in sequence.
+On these numbers it is the larger of the two things left on the table.
+
+**Send/recv over one-sided writes.** NCCL's IB transport moves no data with
+`IBV_WR_SEND` — the receiver writes a descriptor into the sender's memory and
+the sender writes straight back into place, closing with `RDMA_WRITE_WITH_IMM`
+(`ncclIbPostFifo`, `ncclIbIsend` in `src/transport/net_ib.cc`). A sender that
+finds no descriptor returns instead of firing at an unarmed queue, so the RNR
+stall Phase 3 had to work around cannot happen. Only `RdmaTransport` would
+change; the collective above it would not.
+
 ## Toolchain
 
 - **OS**: Ubuntu 22.04 LTS
