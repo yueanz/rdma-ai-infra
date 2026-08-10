@@ -19,9 +19,14 @@ static inline int recv_chunk(int rank, int N, int s) {
  * Blocking-receive path (TCP).
  *
  * recv() does not return until the data is there, so both peers calling it
- * first would deadlock; even ranks send first to break the symmetry. Nothing
- * can be readied in advance here — there is no posting, only waiting — so
- * this path pays the peer's compute time on every round.
+ * first would deadlock; even ranks send first to break the symmetry.
+ *
+ * There is nothing to pre-arm and no RNR to avoid: data arriving before the
+ * peer calls recv() sits in the socket buffer rather than being refused. That
+ * only holds while it fits — the buffer tops out around 6 MB here and the
+ * chunks reach 8 MB — past which the sender blocks on a closed window until
+ * the peer reads. So a slow peer still costs the sender time, as backpressure
+ * rather than as a fixed timer.
  */
 static int ring_blocking(World *w, BufferHandle *r_h, BufferHandle *l_h,
                          BufferHandle *stage_h, float *buf, float *stage,
@@ -66,12 +71,13 @@ static int ring_blocking(World *w, BufferHandle *r_h, BufferHandle *l_h,
  * Posted-receive path (RDMA).
  *
  * The receive for the next step goes up as soon as this step's data lands —
- * before this step's sum is folded in. The peer does not wait for us: it
- * finishes its own sum and sends, and if our queue has nothing posted the
- * message is refused with an RNR NAK and the sender backs off for
- * min_rnr_timer before retrying. Since the retry only succeeds once we do
- * post, the stall lasts as long as our own compute. At 1 MB that was ~500 us
- * a round against ~160 us of actual transfer.
+ * before this step's sum is folded in. A queue pair has no equivalent of the
+ * socket buffer: a message arriving with no receive posted is refused with an
+ * RNR NAK, and the sender waits min_rnr_timer before trying again. The peer
+ * does not wait for us — it finishes its own sum and sends — so leaving the
+ * receive until after the sum makes every step pay that penalty. Measured at
+ * 1 MB, posting after the sum gave a 2013 us all-reduce; posting before it
+ * gave 187 us.
  *
  * Reduce-scatter alternates between the two halves of `stage` for exactly
  * this reason: the next receive is in flight while the previous one is still

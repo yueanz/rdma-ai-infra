@@ -15,8 +15,13 @@ set -u
 cd "$(cd "$(dirname "$0")/.." && pwd)"
 BIN=./build/phase3_collective/allreduce_bench
 OUT=results/phase3_sweep.csv
-# float32 counts: 64 KB, 256 KB, 1 MB, 4 MB, 16 MB of buffer.
-COUNTS=(16384 65536 262144 1048576 4194304)
+# float32 counts: 64 KB, 256 KB, 1 MB, 4 MB, 6 MB, 8 MB, 12 MB, 16 MB of
+# buffer. The three points past 4 MB are close together on purpose: sampled
+# only at 4 MB and 16 MB, bus bandwidth looks like it falls off a cliff, and
+# the obvious suspect is the summation's working set (equal to the buffer)
+# crossing this box's 15 MiB of L3. Filling the gap shows no cliff -- the
+# decline starts at 4 MB and is smooth -- so that explanation is wrong.
+COUNTS=(16384 65536 262144 1048576 1572864 2097152 3145728 4194304)
 REPS=15
 ITERS=200
 R0_CORE=2

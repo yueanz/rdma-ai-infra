@@ -151,6 +151,19 @@ int main(int argc, char *argv[]){
         return -1;
     }
 
+    /* The barrier needs a byte to trade that is not part of the payload. */
+    AlignedFloats scratch;
+    if (scratch.init(16) != 0) {
+        LOG_ERR("allreduce_bench: scratch allocation failed");
+        return -1;
+    }
+    ScopedBuffer scratch_r, scratch_l;
+    if (scratch_r.init(w.right.get(), scratch.p, 16 * sizeof(float)) != 0 ||
+        scratch_l.init(w.left.get(), scratch.p, 16 * sizeof(float)) != 0) {
+        LOG_ERR("allreduce_bench: scratch registration failed");
+        return -1;
+    }
+
     if (ring_allreduce(&w, &r_buf_h.h, &l_buf_h.h, &stage_h.h, buf.p, stage.p, cfg.count) != 0) {
         LOG_ERR("ring_allreduce failed");
         return -1;
@@ -178,7 +191,7 @@ int main(int argc, char *argv[]){
          * longer on a bigger buffer and the two ranks do not finish it
          * together, which otherwise shows up as a stall inside the timed
          * region rather than as the skew it is. */
-        if (world_barrier(&w, &r_buf_h.h, &l_buf_h.h) != 0) {
+        if (world_barrier(&w, &scratch_r.h, &scratch_l.h) != 0) {
             LOG_ERR("world_barrier failed");
             return -1;
         }
@@ -189,6 +202,18 @@ int main(int argc, char *argv[]){
         }
         if (i >= kWarmup)
             latencies[i - kWarmup] = time_elapsed_ns(iter_start, time_now_ns());
+    }
+
+    /* Check again after the timed loop, not just before it. The barrier and
+     * the buffer reset both touch memory the collective also uses, and a bug
+     * there would otherwise never show: the pre-loop check runs before either
+     * of them has executed once. */
+    for (int i = 0; i < cfg.count; i++) {
+        if (std::abs(buf.p[i] - expect) > 1e-3) {
+            LOG_ERR("correctness check failed after timed loop at idx %d: %f != %f",
+                    i, buf.p[i], expect);
+            return -1;
+        }
     }
 
     if (cfg.rank == 0) {

@@ -20,7 +20,10 @@ message size, bandwidth within 2% wherever the link is the bottleneck.
   either through librdmacm or through a hand-written INIT → RTR → RTS state
   machine, selectable at runtime; the data path is shared.
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends via rdma_cm, send/recv + write benchmarks; TCP write omitted — no one-sided primitive)
-- [x] **Phase 3** — Ring All-Reduce (chunked pipeline, ring reduce-scatter + all-gather, RDMA + TCP backends)
+- [x] **Phase 3** — Ring All-Reduce (ring reduce-scatter + all-gather over the
+  Phase 2 interface, RDMA + TCP backends). Receives are posted a step ahead on
+  the RDMA path; without that a late receiver costs the sender an RNR backoff,
+  which at 1 MB was the difference between 2.0 ms and 187 µs.
 - [x] **Phase 4** — Remote slot pool (slab allocator over a single MR; alloc/free on a control channel, data by one-sided write and read, so the server's CPU is not in the data path)
 - [ ] **Phase 5** — Bare-metal RoCEv2 benchmark (in progress). Re-running the Phase 1–4 benchmarks on real ConnectX-4 hardware over RoCEv2.
 
@@ -97,8 +100,10 @@ The whole sweep, against perftest at the same points, plus the figures:
 ```bash
 sudo bash scripts/run_phase1_sweep.sh   # ~10 min -> results/phase1_sweep.csv
 sudo bash scripts/run_phase2_sweep.sh   # ~6 min  -> results/phase2_sweep.csv
+sudo bash scripts/run_phase3_sweep.sh   # ~13 min -> results/phase3_sweep.csv
 python3 scripts/plot_phase1.py          # -> results/*.png
 python3 scripts/plot_phase2.py
+python3 scripts/plot_phase3.py
 ```
 
 The phase 2 sweep changes system-wide settings while it runs — CPU governor,
@@ -121,8 +126,8 @@ the same send and receive path.
 
 ## Benchmark Results
 
-Phases 1 and 2. Phases 3–4 have not been re-run on this hardware yet — that is
-what Phase 5 is.
+Phases 1 to 3. Phase 4 has not been re-run on this hardware yet — that is what
+Phase 5 is.
 
 Latency is one-way throughout: these benchmarks time a round trip and halve it,
 which is what perftest does before printing.
@@ -217,6 +222,37 @@ Both TCP configurations pay for the interrupt path — a traced run makes 8022
 wakeups where the polling one makes 3 — while RDMA takes no interrupt on the
 data path at all. The stock line also varies about 2.4× at 4 KB and 16 KB; the
 cause was not established, and no number above depends on that arm.
+
+### Phase 3 — ring all-reduce over both backends
+
+Median of 15 runs per point, two ranks, float32 sum. Same three arms and the
+same conditions as phase 2. A world of two is the whole ring, so reduce-scatter
+and all-gather are one step each.
+
+![Ring all-reduce over RDMA and TCP](results/phase3-allreduce.png)
+
+- **RDMA finishes 2.5–4.7× sooner** than the better TCP configuration, and
+  again it is the steadier one: run to run its median moves 0.8% against TCP's
+  25–28%.
+- **Bus bandwidth peaks at 54 Gbps of the 100 GbE link at 4 MB**, then falls to
+  30 Gbps by 16 MB.
+- **Over half the time at 16 MB is the summation, not the network.** Timing the
+  two separately inside the collective puts the sum at 36% of the all-reduce at
+  4 MB and 53% at 16 MB. Nothing overlaps them here — a rank sums only once both
+  transfers of that step have completed, and the link is idle while it does.
+
+| | 256 KB | 1 MB | 4 MB | 16 MB |
+|---|---|---|---|---|
+| RDMA, µs | 49.2 | 168.1 | 617.1 | 4480.1 |
+| TCP tuned, µs | 201.8 | 559.6 | 2877.3 | 12944.8 |
+| RDMA bus bw, Gbps | 42.6 | 49.9 | 54.4 | 30.0 |
+
+Sampled only at 4 MB and 16 MB the bandwidth curve looks like a cliff, and the
+obvious culprit is the summation's working set — equal to the buffer — crossing
+this box's 15 MiB of L3. Filling in 6, 8 and 12 MB shows no cliff: the decline
+starts at 4 MB and is gradual, and the transfer half slows down with it (84
+Gbps of payload at 4 MB, 63 at 16 MB). Both halves lose ground as the buffers
+leave cache; which mechanism does it was not isolated.
 
 ---
 
