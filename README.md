@@ -1,17 +1,18 @@
 # RDMA-Based AI Communication Infrastructure
 
-A from-scratch implementation of RDMA communication primitives, transport abstractions, and collective operations — targeting the infrastructure layer of distributed AI training and inference systems.
+RDMA primitives, a transport layer over them, and two workloads that a
+distributed training or inference system would actually run — written from
+scratch on `libibverbs` and `rdma_cm`, no wrappers or frameworks.
 
-Built with `libibverbs` and `rdma_cm` (no wrappers, no frameworks). On top of
-the verbs layer sit two end-to-end workloads: a ring all-reduce (chunked
-reduce-scatter then all-gather, the algorithm NCCL uses), and a remote memory
-pool that clients fill by RDMA write and read back one-sidedly — the transfer
-path a disaggregated KV cache runs on.
+The two workloads are a ring all-reduce (reduce-scatter then all-gather, one of
+the shapes NCCL uses) and a remote memory pool that clients fill by RDMA write
+and read back one-sidedly, which is the transfer path under a disaggregated KV
+cache.
 
-Tested on a real RDMA home lab — two ConnectX-4 NICs, RoCEv2, bare metal,
-back-to-back, each port in its own network namespace so it behaves as an
-independent host — and measured against perftest: latency within 4% at every
-message size, bandwidth within 2% wherever the link is the bottleneck.
+Everything runs on real hardware: two ConnectX-4 NICs cabled back to back over
+RoCEv2, each port in its own network namespace so it behaves as a separate
+host. Against perftest, latency is within 4% at every message size and
+bandwidth within 2% wherever the link is the bottleneck.
 
 ## Phase Status
 
@@ -36,9 +37,9 @@ message size, bandwidth within 2% wherever the link is the bottleneck.
 
 ### Bring-up
 
-The two ports are wired straight to each other. Each device then goes into its
-own network namespace, so one host behaves like two independent peers — and so
-two NICs on one L2 segment cannot confuse each other's ARP.
+The ports are cabled to each other, and each device goes into its own network
+namespace. That makes one host behave as two peers, and keeps two NICs on the
+same L2 segment from answering each other's ARP.
 
 | | |
 |---|---|
@@ -48,10 +49,10 @@ two NICs on one L2 segment cannot confuse each other's ARP.
 | CPU | Xeon E5-1650 v4, 6C/12T, single NUMA node |
 | OS | Ubuntu 22.04, kernel 5.15 |
 
-Sweeps pin the CPU governor to `performance`, stop irqbalance, and put server
-and client on different physical cores. **Both processes are on one machine**:
-the RDMA path is real, but CPU, memory bandwidth and PCIe are shared in a way
-two machines would not be.
+Sweeps pin the governor to `performance`, stop irqbalance, and put the two
+processes on different physical cores. **Both are on one machine**: the RDMA
+path is real, but CPU, memory bandwidth and PCIe are shared in a way two
+machines would not share them.
 
 Step-by-step, and what each step is guarding against:
 [`docs/hardware-setup.md`](docs/hardware-setup.md).
@@ -105,9 +106,10 @@ python3 scripts/plot_phase3.py
 python3 scripts/plot_phase4.py
 ```
 
-The phase 2 sweep changes system-wide settings while it runs — CPU governor,
-irqbalance, NIC interrupt moderation, busy-poll sysctls — and puts them back
-on exit.
+All four pin the CPU governor and stop irqbalance while they run; phases 2 and
+3 also set NIC interrupt moderation and the busy-poll sysctls, since those are
+what their TCP arms are measured with and without. Every one of them puts the
+settings back on exit.
 
 One benchmark on its own — server in `ns1`, client in `ns2`:
 
@@ -119,17 +121,14 @@ sudo ip netns exec ns2 ./build/phase1_verbs/lat_send_recv 192.168.100.1
 Same shape for the others; `--help` lists the options. Both sides must agree on
 `--size`, `--depth` and `--conn`.
 
-`--conn` picks who sets the connection up: `cm` hands it to librdmacm, `verbs`
-walks the queue pair through INIT → RTR → RTS in this code. After that both run
-the same send and receive path.
-
 ## Benchmark Results
 
 All four phases, re-run on this hardware — that is what Phase 5 is.
 
-Phase 1 and 2 report one-way latency: those benchmarks time a round trip and
-halve it, which is what perftest does before printing. Phase 3 reports the time
-for a whole all-reduce, which is not a round trip and is not halved.
+Phases 1 and 2 report one-way latency: those benchmarks time a round trip and
+halve it, which is what perftest does before printing. Phases 3 and 4 report
+what one operation took — a whole all-reduce, or one write or read against a
+remote slot — and halve nothing.
 
 ### Phase 1 — verbs against perftest
 
@@ -138,31 +137,26 @@ at the same points on the same link.
 
 - **Latency within 4% of perftest at every size**, bandwidth within 2%
   wherever the link is the bottleneck.
-- **Receive queue depth decides how often a slow path gets hit** — one work
-  request posted instead of eight costs 1.78 → 3.56 µs one-way. perftest moves
-  the same way, 1.83 → 3.66: this is the hardware, not the implementation.
-- **One-sided is not the faster one** — 8% at 64 B here, 9% for perftest, and
-  nothing at all by 1 MB. What it buys is that the far side posts no work
-  requests and reaps no completions: CPU, not µs.
+- **How many receives you keep posted decides how often a slow path gets hit**
+  — eight posted gives 1.78 µs one-way, one gives 3.56. perftest moves the same
+  way, 1.83 to 3.66, so this is the hardware and not the implementation.
+- **One-sided buys almost no latency** — 8% at 64 B, and nothing at all by
+  1 MB. perftest shows the same 9%. What it does buy is the far side's CPU:
+  that side posts nothing and polls nothing.
 
 #### Receive queue depth
 
 ![latency vs receive queue depth](results/phase1-latency-vs-rq-depth.png)
 
-An arriving message needs a receive work queue entry before the NIC can place
-it. With one posted the NIC often has to go fetch it while the packet is already
-arriving; with eight it almost never does. Past eight the curve is flat.
+The NIC needs a posted receive before it can place an arriving message. Keep
+one posted and it often has to fetch one mid-arrival; keep eight and it almost
+never does. Past eight the curve is flat.
 
-Nothing gets slower — you just hit the slow case more often. At depth 8 the p99
-is 3.60 µs — about what the median is at depth 1. One slow path, two
-frequencies. It is also why depth 1 is the only point whose median wobbles from
-run to run.
-
-perftest's `-r` rounds odd values up, so its line starts at 2.
-
-The one-sided line posts no receive work requests at all, so this knob cannot
-reach it, and its flatness is what says the drop beside it is a real effect
-rather than drift during the sweep.
+Nothing gets slower as the queue shallows — the same slow path just comes up
+more often. At depth 8 the p99 is 3.61 µs, roughly the median at depth 1, and
+depth 1 is the only point that wobbles between runs. The one-sided line posts
+no receives at all, so this knob cannot reach it. Its flatness is what makes
+the drop beside it a real effect and not drift during the sweep.
 
 #### Latency and bandwidth against perftest
 
@@ -176,29 +170,29 @@ parentheses:
 | send/recv | 0.88 (0.86) | 1.77 (1.83) | 8.54 (8.70) | 94.5 (95.1) |
 | write | 0.81 (0.79) | 1.76 (1.80) | 8.39 (8.59) | 94.6 (95.0) |
 
-Messages of 220 B or less go inline: the payload rides inside the work request
-itself, sparing the NIC a separate fetch of the buffer. Before that was added
-the 64 B row read 1.14 and 1.11 — 33–40% behind.
+Messages of 220 B or less ride inside the work request itself, so the NIC never
+fetches the buffer separately. Before that, the 64 B row read 1.14 and 1.11 —
+33–40% behind.
 
 Write bandwidth reaches 92.4 Gbps at 16 KB, 92.0 at 64 KB and 90.8 at 1 MB
-(`ib_write_bw`: 92.5, 92.5, 92.6). Below 16 KB neither tool is link-bound and
-the result turns on how each one pipelines; they are not configured
-equivalently there, so that range is left out rather than claimed.
+(`ib_write_bw`: 92.5, 92.5, 92.6). Below 16 KB neither tool is link-bound, so
+the number depends on how each pipelines rather than on the link. They are not
+configured alike there, so that range is left out.
 
 #### Connection setup mode
 
-librdmacm and the hand-written INIT → RTR → RTS path measure the same —
-1.77 vs 1.77 µs send/recv, 92.03 vs 92.05 Gbps. Setup runs once, before the
-timed loop, so it cannot show up in the numbers; identical numbers mean the
-hand-written path got every QP parameter right.
+The two paths measure the same — 1.77 vs 1.77 µs send/recv, 92.03 vs 92.05
+Gbps. Setup runs once before the timed loop, so it could not show up in the
+numbers anyway; matching numbers mean the hand-written path got every queue
+pair parameter right.
 
 ### Phase 2 — the same interface over RDMA and TCP
 
-Median of 15 runs per point. TCP is measured twice: once tuned for latency
-(`TCP_NODELAY`, interrupt moderation turned down, busy polling so `recv()`
-spins instead of sleeping) and once at stock settings. The gap is quoted against
-whichever configuration measured better at that size, so the comparison never
-leans on a badly configured TCP.
+Median of 15 runs per point. TCP is measured twice — once tuned for latency
+(`TCP_NODELAY`, interrupt moderation down, busy polling so `recv()` spins
+rather than sleeps) and once at stock settings — and the gap is quoted against
+whichever did better at that size. The comparison never leans on a badly
+configured TCP.
 
 ![RDMA vs TCP through one interface](results/phase2-rdma-vs-tcp.png)
 
@@ -207,9 +201,9 @@ leans on a badly configured TCP.
 - **RDMA is 2.4–5.0× faster than the better TCP configuration.** The gap is
   widest for small messages, where fixed per-message cost dominates, and
   narrowest at 1 MB, where both are moving bytes.
-- **It is also far steadier.** Run to run, RDMA's median moves 0.0% (IQR);
-  TCP's moves 8–10%. Per message, **RDMA's p99 is below TCP's median at every
-  size** — its bad case beats TCP's typical case.
+- **It is also far steadier.** Repeat a point and RDMA lands within 0.0% of
+  itself; TCP moves 8–10%. And **RDMA's p99 is below TCP's median at every
+  size** — RDMA's bad case beats TCP's typical one.
 
 | | 64 B | 4 KB | 64 KB | 1 MB |
 |---|---|---|---|---|
@@ -217,34 +211,34 @@ leans on a badly configured TCP.
 | TCP, tuned | 4.47 | 7.26 | 33.9 | 226 |
 | TCP, stock | 7.83 | 19.3 | 42.0 | 267 |
 
-Both TCP configurations pay for the interrupt path — a traced run makes 8022
-wakeups where the polling one makes 3 — while RDMA takes no interrupt on the
-data path at all. The stock line also varies about 2.4× at 4 KB and 16 KB; the
-cause was not established, and no number above depends on that arm.
+Both TCP configurations pay for the interrupt path: a traced run makes 8022
+wakeups where the polling one makes 3. RDMA takes no interrupt at all on the
+data path. The stock line also varies about 2.4× at 4 KB and 16 KB — cause not
+established, and no number above depends on that arm.
 
 ### Phase 3 — ring all-reduce over both backends
 
-Median of 15 runs per point, two ranks, float32 sum. Same three arms and the
-same conditions as phase 2. A world of two is the whole ring, so reduce-scatter
-and all-gather are one step each.
+Median of 15 runs per point, two ranks, float32 sum. Same three arms and
+conditions as phase 2. Two ranks are the whole ring, so reduce-scatter and
+all-gather are one step each.
 
-On the RDMA path each step's receive is posted before the previous step's sum,
-not after. A queue pair has no equivalent of a socket buffer, so a peer that
-sends while this rank is still summing finds nothing posted and backs off for
-`min_rnr_timer`; at 1 MB that was the difference between a 2.0 ms all-reduce
-and a 187 µs one.
+On the RDMA path each step posts its receive before the previous step's sum,
+not after. A queue pair has no socket buffer to fall back on: a peer that sends
+while this rank is still summing finds nothing posted and backs off for
+`min_rnr_timer`. At 1 MB that was 2.0 ms per all-reduce instead of 187 µs.
 
 ![Ring all-reduce over RDMA and TCP](results/phase3-allreduce.png)
 
 - **RDMA finishes 2.5–4.7× sooner** than the better TCP configuration, and
   again it is the steadier one: run to run its median moves 0.8% against TCP's
   25–28%.
-- **Bus bandwidth peaks at 54 Gbps of the 100 GbE link at 4 MB**, then falls to
-  30 Gbps by 16 MB.
-- **Over half the time at 16 MB is the summation, not the network.** Timing the
-  two separately inside the collective puts the sum at 36% of the all-reduce at
-  4 MB and 53% at 16 MB. Nothing overlaps them here — a rank sums only once both
-  transfers of that step have completed, and the link is idle while it does.
+- **Bus bandwidth peaks at 54 Gbps on the 100 GbE link at 4 MB**, then falls
+  to 30 by 16 MB. Bus bandwidth is what each link carries rather than what the
+  caller sees, which is the figure NCCL's own benchmarks report.
+- **Over half the time at 16 MB is summing, not networking.** Timed separately
+  inside the collective, the sum is 36% of a 4 MB all-reduce and 53% of a 16 MB
+  one. Nothing overlaps them: a rank sums only after both transfers of that step
+  finish, and the link sits idle while it does.
 
 | | 256 KB | 1 MB | 4 MB | 16 MB |
 |---|---|---|---|---|
@@ -252,21 +246,20 @@ and a 187 µs one.
 | TCP tuned, µs | 201.8 | 559.6 | 2877.3 | 12944.8 |
 | RDMA bus bw, Gbps | 42.6 | 49.9 | 54.4 | 30.0 |
 
-Sampled only at 4 MB and 16 MB the bandwidth curve looks like a cliff, and the
-obvious culprit is the summation's working set — equal to the buffer — crossing
-this box's 15 MiB of L3. Filling in 6, 8 and 12 MB shows no cliff: the decline
-starts at 4 MB and is gradual, and the transfer half slows down with it (84
-Gbps of payload at 4 MB, 63 at 16 MB). Both halves lose ground as the buffers
-leave cache; which mechanism does it was not isolated.
+Sampled only at 4 MB and 16 MB the curve looks like a cliff. The obvious
+suspect is the sum's working set — the same size as the buffer — crossing this
+box's 15 MiB of L3. Filling in 6, 8 and 12 MB shows no cliff: the decline
+starts at 4 MB and is gradual. The transfer half slows with it, from 84 Gbps of
+payload at 4 MB to 63 at 16 MB. Both halves lose ground as the buffers leave
+cache, but which mechanism causes it was not isolated.
 
 ### Phase 4 — one-sided access to a remote slot
 
 Median of 15 runs per point. A client allocates a slot over the TCP control
-channel, then writes a KV block into it and reads it back with RDMA write and
-read. The server takes no part in either transfer — it sits in its control
-loop — so there is no TCP arm here: TCP has no one-sided primitive, and making
-the server receive would measure something else rather than the same thing
-more slowly.
+channel, then writes a KV block into it and reads it back one-sidedly. The
+server sits in its control loop throughout and takes no part in either
+transfer. There is no TCP arm: TCP has no one-sided primitive, and making the
+server receive would measure a different thing, not the same thing slower.
 
 ![One-sided write and read against a remote slot](results/phase4-oneside.png)
 
@@ -276,9 +269,9 @@ more slowly.
   read gets 53.0 Gbps and sixteen at once gets 54.5; at 4 KB the same change
   takes it from 13.4 to 43.1. What holds large reads at ~53 Gbps was not
   established.
-- **Both are steady** — at one operation outstanding the median moves 0.21%
-  run to run for write and 0.09% for read, the tightest of the four phases,
-  which is what a data path the peer's CPU never touches should look like.
+- **Both are steady.** Repeat a point and write lands within 0.21% of itself,
+  read within 0.09% — the tightest of the four phases. That is what a data path
+  the peer's CPU never touches should look like.
 
 | slot | 4 KB | 64 KB | 1 MB | 4 MB |
 |---|---|---|---|---|
@@ -287,12 +280,12 @@ more slowly.
 | write, Gbps | 15.4 | 59.1 | 88.4 | 91.4 |
 | read, Gbps | 13.4 | 42.8 | 52.5 | 53.0 |
 
-The gap grows with size — 0.3 µs at 4 KB, 266 µs at 4 MB — so it is the
-response stream running slower, not the round trip a read needs before its data
-can start. The queue pair's read limit is ruled out: `max_rd_atomic` is at this
-HCA's maximum of 16, worth 2.8× on a 4 KB read with sixteen outstanding and
-nothing on a 4 MB one. Table figures are for one operation outstanding, the
-access pattern a decode step has.
+The gap grows with size — 0.3 µs at 4 KB, 266 µs at 4 MB. So it is the response
+stream running slow, not the extra round trip a read needs. The queue pair's
+read limit is ruled out: `max_rd_atomic` sits at this HCA's maximum of 16,
+which is worth 2.8× on a 4 KB read with sixteen outstanding and nothing at all
+on a 4 MB one. Table figures are for one operation outstanding, which is what a
+decode step does.
 
 ---
 
@@ -303,21 +296,20 @@ all-reduce here and 53% of a 16 MB one, with the link idle throughout. NCCL
 fuses receive, reduce and send into one primitive; this does them in sequence.
 On these numbers it is the larger of the two things left on the table.
 
-**A test suite.** Correctness is currently checked inside the benchmarks — the
-all-reduce verifies its sums, the KV client round-trips a pattern through a
-remote slot before timing anything — which is where two real bugs turned up,
-but it is the wrong place for it. The checks only run when a benchmark runs,
-they need both namespaces up, and nothing covers the pieces underneath: queue
-pair state transitions, MR registration, `exchange_buf`, slab alloc/free. A
-`tests/` target under CTest with a fixture that brings the namespaces up would
-cover all four phases and take about as long as one of them.
+**A test suite.** Correctness lives inside the benchmarks today: the all-reduce
+verifies its sums, the KV client round-trips a pattern through a remote slot
+before timing. Two real bugs turned up that way, but it is the wrong place for
+it. The checks run only when a benchmark runs, they need both namespaces up,
+and nothing covers the layer underneath — queue pair state transitions, MR
+registration, `exchange_buf`, slab alloc/free. A `tests/` target under CTest
+would cover all four phases.
 
 **Send/recv over one-sided writes.** NCCL's IB transport moves no data with
-`IBV_WR_SEND` — the receiver writes a descriptor into the sender's memory and
-the sender writes straight back into place, closing with `RDMA_WRITE_WITH_IMM`
-(`ncclIbPostFifo`, `ncclIbIsend` in `src/transport/net_ib.cc`). A sender that
-finds no descriptor returns instead of firing at an unarmed queue, so the RNR
-stall Phase 3 had to work around cannot happen. Only `RdmaTransport` would
+`IBV_WR_SEND`. The receiver writes a descriptor into the sender's memory; the
+sender writes straight into place and closes with `RDMA_WRITE_WITH_IMM`
+(`ncclIbPostFifo`, `ncclIbIsend` in `src/transport/net_ib.cc`). A sender with
+no descriptor waiting just returns instead of firing at an unarmed queue, so
+the RNR stall Phase 3 works around cannot happen. Only `RdmaTransport` would
 change; the collective above it would not.
 
 ## Toolchain
