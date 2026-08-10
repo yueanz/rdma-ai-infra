@@ -20,12 +20,9 @@ message size, bandwidth within 2% wherever the link is the bottleneck.
   either through librdmacm or through a hand-written INIT → RTR → RTS state
   machine, selectable at runtime; the data path is shared.
 - [x] **Phase 2** — Transport Abstraction Layer (RDMA + TCP backends via rdma_cm, send/recv + write benchmarks; TCP write omitted — no one-sided primitive)
-- [x] **Phase 3** — Ring All-Reduce (ring reduce-scatter + all-gather over the
-  Phase 2 interface, RDMA + TCP backends). Receives are posted a step ahead on
-  the RDMA path; without that a late receiver costs the sender an RNR backoff,
-  which at 1 MB was the difference between 2.0 ms and 187 µs.
+- [x] **Phase 3** — Ring All-Reduce (ring reduce-scatter + all-gather over the Phase 2 interface, RDMA + TCP backends)
 - [x] **Phase 4** — Remote slot pool (slab allocator over a single MR; alloc/free on a control channel, data by one-sided write and read, so the server's CPU is not in the data path)
-- [ ] **Phase 5** — Bare-metal RoCEv2 benchmark (in progress). Re-running the Phase 1–4 benchmarks on real ConnectX-4 hardware over RoCEv2.
+- [ ] **Phase 5** — Bare-metal RoCEv2 benchmark (in progress). Re-running the earlier phases on real ConnectX-4 hardware over RoCEv2; 1 to 3 are done, 4 is not.
 
 ## Hardware & Test Environment
 
@@ -129,8 +126,9 @@ the same send and receive path.
 Phases 1 to 3. Phase 4 has not been re-run on this hardware yet — that is what
 Phase 5 is.
 
-Latency is one-way throughout: these benchmarks time a round trip and halve it,
-which is what perftest does before printing.
+Phase 1 and 2 report one-way latency: those benchmarks time a round trip and
+halve it, which is what perftest does before printing. Phase 3 reports the time
+for a whole all-reduce, which is not a round trip and is not halved.
 
 ### Phase 1 — verbs against perftest
 
@@ -146,7 +144,7 @@ at the same points on the same link.
   nothing at all by 1 MB. What it buys is that the far side posts no work
   requests and reaps no completions: CPU, not µs.
 
-### Receive queue depth
+#### Receive queue depth
 
 ![latency vs receive queue depth](results/phase1-latency-vs-rq-depth.png)
 
@@ -165,7 +163,7 @@ The one-sided line posts no receive work requests at all, so this knob cannot
 reach it, and its flatness is what says the drop beside it is a real effect
 rather than drift during the sweep.
 
-### Latency and bandwidth against perftest
+#### Latency and bandwidth against perftest
 
 ![latency vs message size](results/phase1-latency-vs-size.png)
 
@@ -186,7 +184,7 @@ Write bandwidth reaches 92.4 Gbps at 16 KB, 92.0 at 64 KB and 90.8 at 1 MB
 the result turns on how each one pipelines; they are not configured
 equivalently there, so that range is left out rather than claimed.
 
-### Connection setup mode
+#### Connection setup mode
 
 librdmacm and the hand-written INIT → RTR → RTS path measure the same —
 1.77 vs 1.77 µs send/recv, 92.03 vs 92.05 Gbps. Setup runs once, before the
@@ -228,6 +226,12 @@ cause was not established, and no number above depends on that arm.
 Median of 15 runs per point, two ranks, float32 sum. Same three arms and the
 same conditions as phase 2. A world of two is the whole ring, so reduce-scatter
 and all-gather are one step each.
+
+On the RDMA path each step's receive is posted before the previous step's sum,
+not after. A queue pair has no equivalent of a socket buffer, so a peer that
+sends while this rank is still summing finds nothing posted and backs off for
+`min_rnr_timer`; at 1 MB that was the difference between a 2.0 ms all-reduce
+and a 187 µs one.
 
 ![Ring all-reduce over RDMA and TCP](results/phase3-allreduce.png)
 
