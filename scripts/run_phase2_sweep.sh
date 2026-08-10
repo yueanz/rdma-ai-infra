@@ -46,6 +46,7 @@ sudo -v || exit 1
 sudo pkill -9 backend_compare 2>/dev/null
 mkdir -p results
 
+TTY_SAVED=$(stty -g 2>/dev/null)
 GOV=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)
 for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
     echo performance | sudo tee "$g" >/dev/null
@@ -82,9 +83,9 @@ restore() {
     echo "$BUSY_POLL" | sudo tee /proc/sys/net/core/busy_poll >/dev/null
     sudo ip netns exec ns1 ethtool -C "$NS1_DEV" adaptive-rx on 2>/dev/null
     sudo ip netns exec ns2 ethtool -C "$NS2_DEV" adaptive-rx on 2>/dev/null
-    # A backgrounded sudo killed mid-prompt leaves the terminal with echo and
-    # ONLCR off, which looks like a hung shell. Put it back.
-    stty sane 2>/dev/null
+    # Restore the exact terminal settings we started with, in case a killed
+    # child left echo or ONLCR off.
+    [ -n "$TTY_SAVED" ] && stty "$TTY_SAVED" 2>/dev/null
 }
 trap restore EXIT
 
@@ -110,8 +111,13 @@ for rep in $(seq 1 $REPS); do
         if [ "$arm" = tcp_untuned ]; then be=tcp; tcp_tuning_off; else tcp_tuning_on; fi
         for size in "${SIZES[@]}"; do
             iters=$(iters_for "$size")
+            # </dev/null so the backgrounded sudo can never reach for the
+            # terminal to prompt. Without it, SIGKILL below can land while
+            # sudo has echo and ONLCR turned off, and the shell is left
+            # printing a staircase and swallowing Enter.
             sudo taskset -c $SRV_CORE ip netns exec ns1 \
-                "$BIN" $be --port $port --size "$size" --iters $iters --csv >/dev/null 2>&1 &
+                "$BIN" $be --port $port --size "$size" --iters $iters --csv \
+                </dev/null >/dev/null 2>&1 &
             srv=$!
             sleep 0.4
             row=$(sudo timeout 120 taskset -c $CLI_CORE ip netns exec ns2 \

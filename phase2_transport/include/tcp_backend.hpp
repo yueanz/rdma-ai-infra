@@ -13,6 +13,7 @@ public:
 
     int send_async(const BufferHandle *h, size_t len, uint64_t id, size_t offset) override;
     int recv_async(BufferHandle *h, size_t len, uint64_t id, size_t offset) override;
+    bool recv_blocks() const override { return true; }
     int write_async(const BufferHandle *local, uint64_t remote_addr, uint32_t rkey,
                             size_t len, uint64_t id, size_t offset) override;
     int read_async(const BufferHandle *local, uint64_t remote_addr, uint32_t rkey,

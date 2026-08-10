@@ -58,6 +58,10 @@ fi
 # +4% at 64 B, +11% at 1 KB, +3.5% at 16 KB, and nothing by 256 KB, and widens
 # the run-to-run spread at 16 KB from 0.3% to 2.7%. The two were not varied
 # separately, so which one earns which share is unmeasured.
+# Saved so cleanup can undo a killed child leaving echo or ONLCR off, which
+# makes the shell print a staircase and appear to ignore Enter.
+TTY_SAVED=$(stty -g 2>/dev/null)
+
 IRQBALANCE_WAS_ACTIVE=0
 if systemctl is-active --quiet irqbalance 2>/dev/null; then
     IRQBALANCE_WAS_ACTIVE=1
@@ -78,6 +82,7 @@ if [ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
 fi
 
 cleanup() {
+    [ -n "$TTY_SAVED" ] && stty "$TTY_SAVED" 2>/dev/null
     pkill -f "$BIN/" 2>/dev/null
     pkill -f "ib_(send|write)_(lat|bw)" 2>/dev/null
     [ "$IRQBALANCE_WAS_ACTIVE" -eq 1 ] && systemctl start irqbalance
@@ -171,7 +176,7 @@ run_mine() {
 
     taskset -c "$SERVER_CPU" ip netns exec "$NS1" "$BIN/$bench" \
         --port "$port" --conn "$conn" --size "$size" --depth "$depth" \
-        --iters "$iters" >/dev/null 2>&1 &
+        --iters "$iters" </dev/null >/dev/null 2>&1 &
     srv=$!
     sleep 0.3   # both listeners go up before the device work, so this is margin
 
@@ -212,7 +217,7 @@ run_perftest() {
 
     taskset -c "$SERVER_CPU" ip netns exec "$NS1" "$tool" \
         -d "$NS1_DEV" -x "$NS1_GID" -s "$size" -n "$iters" -p "$port" \
-        "${extra[@]}" >/dev/null 2>&1 &
+        "${extra[@]}" </dev/null >/dev/null 2>&1 &
     srv=$!
     sleep 0.3
 

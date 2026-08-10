@@ -36,7 +36,26 @@ int world_init(World *w, int rank, int size,
  *   l_h         — buf registered on world.left
  *   stage_h     — stage registered on world.left
  *   buf, count  — input/output array
- *   stage       — staging buffer of count/world.size floats
+ *   stage       — 2 * count/world.size floats. Two halves, not one: on a
+ *                 backend whose receives only post a work request, the next
+ *                 round's receive goes up before this round's sum is folded
+ *                 in, so the two cannot share a buffer. A sender that arrives
+ *                 while the peer is still summing would otherwise find no
+ *                 receive posted and stall on an RNR NAK — worth ~500 us per
+ *                 round at 1 MB, dwarfing the transfer itself.
  */
 int ring_allreduce(World *w, BufferHandle *r_h, BufferHandle *l_h, BufferHandle *stage_h,
                     float *buf, float *stage, size_t count);
+
+/*
+ * Block until every rank has reached this point.
+ *
+ * A benchmark needs this before it starts the clock. Ranks drift apart doing
+ * their own between-iteration work, and on the posted-receive path a rank
+ * that arrives early sends into a queue the late one has not armed yet — an
+ * RNR NAK, and a stall the timer then charges to the collective. Without a
+ * barrier the p99 here was ~2 ms against a 190 us median.
+ *
+ * `scratch` must be at least one byte, registered on both neighbours.
+ */
+int world_barrier(World *w, BufferHandle *r_h, BufferHandle *l_h);

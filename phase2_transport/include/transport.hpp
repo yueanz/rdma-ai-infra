@@ -47,6 +47,16 @@ public:
     virtual int send_async(const BufferHandle *h, size_t len, uint64_t id, size_t offset) = 0;
     virtual int recv_async(BufferHandle *h, size_t len, uint64_t id, size_t offset) = 0;
 
+    /*
+     * Whether recv_async() blocks until data arrives. The comment above says
+     * it does on TCP and does not on RDMA; collectives need to branch on it
+     * rather than assume. Posting a receive first is always right when it
+     * does not block — it is what keeps an RDMA sender from arriving at a
+     * queue with nothing posted — but two peers both blocking in recv() on
+     * TCP is a deadlock, so those have to stagger who speaks first.
+     */
+    virtual bool recv_blocks() const = 0;
+
     // One-sided write: local buffer → remote addr (RDMA only; TCP falls back to send)
     // remote_addr and rkey obtained from peer during handshake
     virtual int write_async(const BufferHandle *local,

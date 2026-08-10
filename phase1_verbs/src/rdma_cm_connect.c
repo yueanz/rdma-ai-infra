@@ -129,7 +129,18 @@ int rai_cm_accept_qp(rai_qp_t *qp) {
     }
 
     struct ibv_qp_attr rnr_attr = {0};
-    rnr_attr.min_rnr_timer = 31;
+    /* 12 is 0.64 ms. The encoding is not a duration but an index, and 31 --
+     * the natural "maximum patience" pick -- is 491.52 ms, so a receiver that
+     * is a few hundred microseconds late costs the sender half a second. A
+     * ring all-reduce hits that on every round once the ranks drift apart:
+     * 1 MB took 35 s at 31 and 0.5 s at 12. Retries are still infinite
+     * (rnr_retry_count below), this only sets how long each one waits.
+     *
+     * Shared with phases 1 and 2, so both were re-measured after the change:
+     * phase 1 send/recv at 4 KB reads 1.790 us against 1.770 published, and
+     * phase 2 at 1 MB is unchanged to the decimal. Neither ever hits an RNR
+     * anyway -- their receives are posted well ahead of the matching send. */
+    rnr_attr.min_rnr_timer = 12;
     if (ibv_modify_qp(qp->qp, &rnr_attr, IBV_QP_MIN_RNR_TIMER) != 0) {
         LOG_ERR("ibv_modify_qp min_rnr_timer failed(non-fatal)");
     }

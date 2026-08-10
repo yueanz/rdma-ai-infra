@@ -177,7 +177,7 @@ static int qp_to_rts(rai_qp_t *qp) {
     attr.max_dest_rd_atomic = 1;
     /* 31 (~491ms per retry) matches what the CM path sets after rdma_accept,
      * so a CM-vs-verbs comparison isn't skewed by different RNR budgets. */
-    attr.min_rnr_timer      = 31;
+    attr.min_rnr_timer      = 12;   /* 0.64 ms; see rdma_cm_connect.c */
     attr.ah_attr.is_global      = 1;
     attr.ah_attr.grh.dgid       = qp->remote.gid;
     attr.ah_attr.grh.sgid_index = qp->gid_index;

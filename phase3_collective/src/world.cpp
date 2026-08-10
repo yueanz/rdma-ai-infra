@@ -62,3 +62,38 @@ int world_init(World *w, int rank, int size,
 
     return 0;
 }
+
+int world_barrier(World *w, BufferHandle *r_h, BufferHandle *l_h) {
+    if (w == nullptr || w->size < 2)
+        return 0;
+
+    /* One byte each way. Receives go up before the send on the path where
+     * that is possible, for the same reason ring_allreduce does it. */
+    const size_t n = 1;
+    const uint64_t id = ~0ull;
+
+    if (!w->left->recv_blocks()) {
+        if (w->left->recv_async(l_h, n, id, 0) != 0 ||
+            w->right->send_async(r_h, n, id, 0) != 0) {
+            LOG_ERR("world_barrier failed: post failed");
+            return -1;
+        }
+    } else if (w->rank % 2 == 0) {
+        if (w->right->send_async(r_h, n, id, 0) != 0 ||
+            w->left->recv_async(l_h, n, id, 0) != 0) {
+            LOG_ERR("world_barrier failed: post failed");
+            return -1;
+        }
+    } else {
+        if (w->left->recv_async(l_h, n, id, 0) != 0 ||
+            w->right->send_async(r_h, n, id, 0) != 0) {
+            LOG_ERR("world_barrier failed: post failed");
+            return -1;
+        }
+    }
+    if (w->left->poll(nullptr) != 0 || w->right->poll(nullptr) != 0) {
+        LOG_ERR("world_barrier failed: poll failed");
+        return -1;
+    }
+    return 0;
+}
