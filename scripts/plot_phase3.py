@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Turn the phase3 sweep CSV into the README figure and tables.
 
-Bus bandwidth rather than time, because busbw = (bytes/time) * 2(N-1)/N is a
-transform of the same measurement and only one of the two has any shape to it:
-plotted against size the times are three near-straight lines on log-log, while
-the bandwidth peaks at 4 MB and falls away. The times are tabulated below
-instead. busbw is also what NCCL's own benchmarks report, so it is the number
-that can be held against something outside this repo.
+Two stacked panels. Time first, to stay readable next to the phase 1 and 2
+figures, which also plot time against message size. Bus bandwidth second,
+because it is the same measurement transformed — busbw = (bytes/time) *
+2(N-1)/N, and that correction is 1 for a world of two — but the only one of
+the two with any shape: the times are three near-straight lines on log-log
+while the bandwidth peaks at 4 MB and falls away. busbw is also what NCCL's
+own benchmarks report, so it is the number that can be held against something
+outside this repo.
 
 Usage: python3 scripts/plot_phase3.py [results/phase3_sweep.csv] [outdir]
 """
@@ -74,41 +76,46 @@ def fmt_bytes(v, _pos=None):
 
 def figure(us, bw):
     sizes = sorted({k[1] for k in us})
-    fig, ax = plt.subplots(figsize=(7.6, 4.4))
+    fig, (ax_t, ax_b) = plt.subplots(2, 1, figsize=(7.6, 7.4), sharex=True)
 
     for be, color, style, label in ARMS:
-        ax.plot(sizes, [med(bw, be, s) for s in sizes], color=color,
-                linestyle=style, linewidth=2, marker="o", markersize=5,
-                label=label, zorder=3)
+        ax_t.plot(sizes, [med(us, be, s) for s in sizes], color=color,
+                  linestyle=style, linewidth=2, marker="o", markersize=5,
+                  label=label, zorder=3)
+        ax_b.plot(sizes, [med(bw, be, s) for s in sizes], color=color,
+                  linestyle=style, linewidth=2, marker="o", markersize=5,
+                  zorder=3)
 
-    ax.set_xscale("log", base=2)
-    # Every size gets a tick, but only some get a label -- the points past
-    # 4 MB are deliberately close together and the labels collide otherwise.
-    ax.set_xticks(sizes)
-    ax.set_xticklabels([fmt_bytes(s) if s in LABELLED else "" for s in sizes])
-    ax.set_xlabel("buffer size (bytes)")
-    ax.set_ylabel("bus bandwidth (Gbps)")
-    ax.grid(True, color=GRID, linewidth=0.6, zorder=0)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
+    for ax in (ax_t, ax_b):
+        ax.set_xscale("log", base=2)
+        # Every size gets a tick, but only some get a label -- the points past
+        # 4 MB are deliberately close together and the labels collide.
+        ax.set_xticks(sizes)
+        ax.set_xticklabels([fmt_bytes(s) if s in LABELLED else "" for s in sizes])
+        ax.grid(True, color=GRID, linewidth=0.6, zorder=0)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
 
-    ax.set_ylim(0, 108)
-    ax.axhline(100, color=INK_2, linewidth=0.8, linestyle=":", zorder=1)
-    ax.annotate("100 GbE link", xy=(sizes[0], 100), xytext=(0, -12),
-                textcoords="offset points", fontsize=8, color=INK_2)
+    ax_t.set_yscale("log")
+    ax_t.set_ylabel("all-reduce time (µs)")
+    ax_t.set_title("Ring all-reduce, two ranks, one interface over two backends",
+                   fontsize=10.5, loc="left")
+    ax_t.legend(loc="upper left", frameon=False, fontsize=8.5)
 
-    # The gap in time at each end, against whichever TCP configuration
-    # measured better there. Bandwidth is the reciprocal, so the same ratio.
+    # The gap at each end, against whichever TCP configuration measured better.
     for s in (sizes[0], sizes[-1]):
-        r, t = med(bw, "rdma", s), max(med(bw, "tcp", s), med(bw, "tcp_untuned", s))
-        ax.annotate(f"{r/t:.1f}×", xy=(s, (r + t) / 2), fontsize=9,
-                    color=INK_2, ha="center", va="center")
+        r = med(us, "rdma", s)
+        t = min(med(us, "tcp", s), med(us, "tcp_untuned", s))
+        ax_t.annotate(f"{t/r:.1f}×", xy=(s, (r * t) ** 0.5), fontsize=9,
+                      color=INK_2, ha="center", va="center")
 
-    # Upper right is the only empty quadrant: the link marker sits top
-    # left and both backends run along the bottom half.
-    ax.legend(loc="upper right", frameon=False, fontsize=8.5)
-    ax.set_title("Ring all-reduce, two ranks, one interface over two backends",
-                 fontsize=10.5, loc="left")
+    ax_b.set_ylim(0, 108)
+    ax_b.set_ylabel("bus bandwidth (Gbps)")
+    ax_b.set_xlabel("buffer size (bytes)")
+    ax_b.axhline(100, color=INK_2, linewidth=0.8, linestyle=":", zorder=1)
+    ax_b.annotate("100 GbE link", xy=(sizes[0], 100), xytext=(0, -12),
+                  textcoords="offset points", fontsize=8, color=INK_2)
+
     fig.tight_layout()
     out = f"{OUTDIR}/phase3-allreduce.png"
     fig.savefig(out, dpi=140)

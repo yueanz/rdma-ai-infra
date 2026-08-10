@@ -403,8 +403,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     if (cfg.csv_header) {
-        /* Same column order as phase 1's BENCH_CSV_HEADER (bench_config.h):
-         * bench,conn,size,depth,iters,min_us,median_us,p99_us,max_us,gbps */
+        /* Same column order as phase 1's BENCH_CSV_HEADER (bench_config.h),
+         * so one reader handles every phase. gbps is always empty here and
+         * that is deliberate: these are ping-pongs with one message in flight,
+         * so bytes over elapsed time would report size divided by round-trip
+         * latency, not what the link can carry. Phase 1's bw_* benchmarks keep
+         * a queue depth and measure that properly. */
         printf("bench,conn,size,depth,iters,min_us,median_us,p99_us,max_us,gbps\n");
         return 0;
     }
